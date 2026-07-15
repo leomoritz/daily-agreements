@@ -237,6 +237,8 @@ export function ListaDeAcordosPage() {
     <main className="lista-de-acordos-page">
       <h1>Lista de Acordos</h1>
 
+      <CadastroEmLotePanel onProcessado={handleLoteProcessado} />
+
       <form
         className="lista-de-acordos-page__busca"
         role="search"
@@ -251,8 +253,6 @@ export function ListaDeAcordosPage() {
           placeholder="Buscar por título ou Responsável..."
         />
       </form>
-
-      <CadastroEmLotePanel onProcessado={handleLoteProcessado} />
 
       {status === 'carregando' && <p role="status">Carregando lista de Tasks...</p>}
 

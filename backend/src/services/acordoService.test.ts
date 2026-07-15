@@ -1451,6 +1451,93 @@ describe('AcordoService.avaliarAcordoAtual', () => {
   });
 });
 
+// Unit tests for AcordoService.finalizarTask ("Finalizar" — ação manual):
+// composes avaliarAcordoAtual('cumprido') instead of duplicating its
+// validation, so these tests focus on the behavior added on top of it:
+// marking the Task as concluída unconditionally, regardless of the
+// Acordo_Atual's Tipo_de_Acordo, and the error cases already covered by
+// avaliarAcordoAtual (Task não encontrada, sem Acordo_Atual).
+describe('AcordoService.finalizarTask', () => {
+  async function montarCenarioComAcordoAtual(nomeTipoAcordo: string) {
+    const taskRepository = new InMemoryTaskRepository();
+    const acordoRepository = new InMemoryAcordoRepository();
+    const tipoAcordoId = randomUUID();
+    const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+      { id: tipoAcordoId, nome: nomeTipoAcordo },
+    ]);
+    const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+
+    const service = new AcordoService(
+      taskRepository as unknown as TaskRepository,
+      acordoRepository as unknown as AcordoRepository,
+      tipoAcordoRepository,
+      usuarioCadastradoRepository,
+    );
+
+    const taskNova = await criarTaskNova(taskRepository, 'Task de teste');
+    const acordoAtual = await service.registrarAcordo(taskNova.id, tipoAcordoId);
+
+    return { service, taskRepository, acordoRepository, taskId: taskNova.id, acordoAtual };
+  }
+
+  it('marca o Acordo_Atual como cumprido e a Task como concluída, mesmo quando o Tipo_de_Acordo não é "Finalizar"', async () => {
+    const cenario = await montarCenarioComAcordoAtual('Enviar para review');
+
+    const acordoAtualizado = await cenario.service.finalizarTask(cenario.taskId);
+
+    expect(acordoAtualizado.id).toBe(cenario.acordoAtual.id);
+    expect(acordoAtualizado.estadoCumprimento).toBe('cumprido');
+
+    const taskDepois = await cenario.taskRepository.findById(cenario.taskId);
+    expect(taskDepois!.concluida).toBe(true);
+
+    // Acordo_Atual e histórico permanecem preservados/consultáveis
+    expect(taskDepois!.acordoAtualId).toBe(cenario.acordoAtual.id);
+    const historico = await cenario.acordoRepository.findHistoryByTaskId(cenario.taskId);
+    expect(historico).toHaveLength(1);
+  });
+
+  it('marca a Task como concluída também quando o Tipo_de_Acordo do Acordo_Atual é "Finalizar"', async () => {
+    const cenario = await montarCenarioComAcordoAtual('Finalizar');
+
+    await cenario.service.finalizarTask(cenario.taskId);
+
+    const taskDepois = await cenario.taskRepository.findById(cenario.taskId);
+    expect(taskDepois!.concluida).toBe(true);
+  });
+
+  it('rejeita uma Task que não existe com NotFoundError', async () => {
+    const taskRepository = new InMemoryTaskRepository();
+    const acordoRepository = new InMemoryAcordoRepository();
+    const service = new AcordoService(
+      taskRepository as unknown as TaskRepository,
+      acordoRepository as unknown as AcordoRepository,
+      new InMemoryCadastroLookup(),
+      new InMemoryCadastroLookup(),
+    );
+
+    await expect(service.finalizarTask(randomUUID())).rejects.toThrow(NotFoundError);
+  });
+
+  it('rejeita uma Task_Nova (sem Acordo_Atual) com ConflictError, preservando concluida = false', async () => {
+    const taskRepository = new InMemoryTaskRepository();
+    const acordoRepository = new InMemoryAcordoRepository();
+    const service = new AcordoService(
+      taskRepository as unknown as TaskRepository,
+      acordoRepository as unknown as AcordoRepository,
+      new InMemoryCadastroLookup(),
+      new InMemoryCadastroLookup(),
+    );
+
+    const taskNova = await criarTaskNova(taskRepository, 'Task_Nova sem acordo');
+
+    await expect(service.finalizarTask(taskNova.id)).rejects.toThrow(ConflictError);
+
+    const taskDepois = await taskRepository.findById(taskNova.id);
+    expect(taskDepois!.concluida).toBe(false);
+  });
+});
+
 // Unit tests for AcordoService.repetirUltimoAcordo ("Repetir último
 // acordo"): composes avaliarAcordoAtual + registrarAcordo instead of
 // duplicating their logic, so these tests focus on the two branching

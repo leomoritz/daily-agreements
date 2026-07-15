@@ -89,6 +89,17 @@ export function repetirUltimoAcordo(taskId: string): Promise<Acordo> {
   });
 }
 
+/**
+ * POST /tasks/:id/finalizar — "Finalizar": marca o Acordo_Atual da Task
+ * como cumprido e finaliza a atividade (marca a Task como concluída),
+ * independentemente do Tipo_de_Acordo do Acordo_Atual.
+ */
+export function finalizarTask(taskId: string): Promise<Acordo> {
+  return request<Acordo>(`/tasks/${encodeURIComponent(taskId)}/finalizar`, {
+    method: 'POST',
+  });
+}
+
 /** POST /tasks/lote — cadastro em lote a partir de texto colado (Requisito 12). */
 export function processarLote(texto: string): Promise<ResultadoLinhaLote[]> {
   return request<ResultadoLinhaLote[]>('/tasks/lote', { method: 'POST', body: { texto } });

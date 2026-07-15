@@ -170,6 +170,20 @@ tasksRouter.post(
   }),
 );
 
+// POST /tasks/:id/finalizar — "Finalizar": marca o Acordo_Atual da Task
+// como cumprido e finaliza a atividade (marca a Task como concluída),
+// independentemente do Tipo_de_Acordo do Acordo_Atual. Delegates to
+// AcordoService.finalizarTask. Registered before `/:id/acordos` would
+// ever conflict — Express matches the more specific `/:id/finalizar`
+// literal segment ahead of any param-only route.
+tasksRouter.post(
+  '/:id/finalizar',
+  asyncHandler(async (req, res) => {
+    const acordo = await acordoService.finalizarTask(req.params.id);
+    res.status(200).json(acordo);
+  }),
+);
+
 // GET /tasks/:id/historico — returns the Task's full Acordo history.
 // Delegates to TaskService.buscarHistorico (Requirements 7.1, 7.4, 7.5).
 tasksRouter.get(

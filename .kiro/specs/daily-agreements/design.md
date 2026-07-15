@@ -112,6 +112,7 @@ graph TB
 | POST | `/tasks/:id/acordos` | Registra um novo Acordo (primeiro ou próximo) | 2, 5 |
 | PATCH | `/tasks/:id/acordos/atual` | Avalia o Acordo_Atual (cumprido/não cumprido + motivo opcional) | 4, 6 |
 | POST | `/tasks/:id/acordos/repetir` | "Repetir último acordo": avalia o Acordo_Atual (cumprido se "Avaliar e planejar", não cumprido nos demais casos) e registra um novo Acordo do mesmo Tipo_de_Acordo, mantendo o Responsável e o indicador de alerta (Requisito 3.6) já na primeira repetição | — |
+| POST | `/tasks/:id/finalizar` | "Finalizar": marca o Acordo_Atual da Task como cumprido e finaliza a atividade (`Task.concluida = true`), independentemente do Tipo_de_Acordo do Acordo_Atual | 6 |
 | POST | `/tasks/lote` | Cadastro em lote a partir de texto colado | 12 |
 | GET/POST | `/tipos-de-acordo` | Lista/adiciona Tipo_de_Acordo | 10 |
 | DELETE | `/tipos-de-acordo/:id` | Remove Tipo_de_Acordo (se não estiver em uso) | 10.5 |

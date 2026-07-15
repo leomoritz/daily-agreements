@@ -39,8 +39,15 @@ export function CadastroEmLotePanel({ onProcessado }: CadastroEmLotePanelProps =
   const [status, setStatus] = useState<Status>('idle');
   const [resultado, setResultado] = useState<ResultadoLinhaLote[] | null>(null);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
+  
+  // Estado para controlar a abertura do Accordion
+  const [isOpen, setIsOpen] = useState(false);
 
   const enviando = status === 'enviando';
+
+  function toggleAccordion() {
+    setIsOpen(!isOpen);
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -70,88 +77,108 @@ export function CadastroEmLotePanel({ onProcessado }: CadastroEmLotePanelProps =
   }
 
   return (
-    <section className="cadastro-em-lote-panel" aria-labelledby="cadastro-em-lote-titulo">
-      <h2 id="cadastro-em-lote-titulo">Cadastro em Lote</h2>
-      <p className="cadastro-em-lote-panel__instrucoes">
-        Cole uma Task por linha. Opcionalmente informe o Tipo_de_Acordo separado por
-        &quot;;&quot; (ex.: <code>Revisar contrato;Enviar para code review</code>).
-      </p>
+    // Estrutura do Accordion baseada em <section>
+    <section 
+      className={`cadastro-em-lote-panel ${isOpen ? 'cadastro-em-lote-panel--aberto' : ''}`} 
+      aria-labelledby="cadastro-em-lote-titulo"
+    >
+      {/* Cabeçalho clicável do Accordion para alternar o estado de exibição */}
+      <header 
+        className="cadastro-em-lote-panel__header" 
+        onClick={toggleAccordion}
+        role="button"
+        aria-expanded={isOpen}
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'between', alignItems: 'center' }}
+      >
+        <h2 id="cadastro-em-lote-titulo">Cadastro em Lote</h2>
+        <span className="cadastro-em-lote-panel__icone" aria-hidden="true">
+          {isOpen ? '▲' : '▼'}
+        </span>
+      </header>
 
-      <form onSubmit={handleSubmit} className="cadastro-em-lote-panel__form">
-        <label htmlFor="cadastro-em-lote-textarea" className="cadastro-em-lote-panel__label">
-          Tasks a cadastrar
-        </label>
-        <textarea
-          id="cadastro-em-lote-textarea"
-          className="cadastro-em-lote-panel__textarea"
-          value={texto}
-          onChange={(event) => setTexto(event.target.value)}
-          placeholder={'Título da Task 1\nTítulo da Task 2;Enviar para code review'}
-          rows={8}
-          disabled={enviando}
-        />
-
-        <button
-          type="submit"
-          className="cadastro-em-lote-panel__submit"
-          disabled={enviando || texto.trim().length === 0}
-        >
-          {enviando ? 'Processando...' : 'Cadastrar em lote'}
-        </button>
-      </form>
-
-      {enviando && (
-        <p role="status" className="cadastro-em-lote-panel__carregando">
-          Processando lote...
+      {/* Conteúdo encapsulado que expande ou oculta dependendo do estado */}
+      <div className={`cadastro-em-lote-panel__conteudo ${isOpen ? 'cadastro-em-lote-panel__conteudo--visivel' : 'cadastro-em-lote-panel__conteudo--oculto'}`}>
+        <p className="cadastro-em-lote-panel__instrucoes">
+          Cole uma Task por linha. Opcionalmente informe o Tipo_de_Acordo separado por
+          &quot;;&quot; (ex.: <code>Revisar contrato;Enviar para code review</code>).
         </p>
-      )}
 
-      {status === 'erro' && (
-        <p role="alert" className="cadastro-em-lote-panel__erro">
-          {mensagemErro}
-        </p>
-      )}
+        <form onSubmit={handleSubmit} className="cadastro-em-lote-panel__form">
+          <label htmlFor="cadastro-em-lote-textarea" className="cadastro-em-lote-panel__label">
+            Tasks a cadastrar
+          </label>
+          <textarea
+            id="cadastro-em-lote-textarea"
+            className="cadastro-em-lote-panel__textarea"
+            value={texto}
+            onChange={(event) => setTexto(event.target.value)}
+            placeholder={'Título da Task 1\nTítulo da Task 2;Enviar para code review'}
+            rows={8}
+            disabled={enviando}
+          />
 
-      {status === 'sucesso' && resultado && (
-        <ul
-          className="cadastro-em-lote-panel__relatorio"
-          aria-label="Relatório do cadastro em lote"
-          data-testid="cadastro-em-lote-relatorio"
-        >
-          {resultado.length === 0 ? (
-            <li className="cadastro-em-lote-panel__relatorio-vazio">
-              Nenhuma linha foi enviada para processamento.
-            </li>
-          ) : (
-            resultado.map((linha) => (
-              <li
-                key={linha.numeroLinha}
-                className={
-                  linha.aceita
-                    ? 'cadastro-em-lote-panel__relatorio-item cadastro-em-lote-panel__relatorio-item--aceita'
-                    : 'cadastro-em-lote-panel__relatorio-item cadastro-em-lote-panel__relatorio-item--rejeitada'
-                }
-                data-testid="cadastro-em-lote-linha"
-              >
-                <span className="cadastro-em-lote-panel__relatorio-numero">
-                  Linha {linha.numeroLinha}:
-                </span>{' '}
-                <span className="cadastro-em-lote-panel__relatorio-texto">
-                  &quot;{linha.linha}&quot;
-                </span>{' '}
-                {linha.aceita ? (
-                  <span className="cadastro-em-lote-panel__relatorio-status">Aceita</span>
-                ) : (
-                  <span className="cadastro-em-lote-panel__relatorio-status">
-                    Rejeitada
-                    {linha.motivoMensagem ? ` — ${linha.motivoMensagem}` : ''}
-                  </span>
-                )}
+          <button
+            type="submit"
+            className="cadastro-em-lote-panel__submit"
+            disabled={enviando || texto.trim().length === 0}
+          >
+            {enviando ? 'Processando...' : 'Cadastrar em lote'}
+          </button>
+        </form>
+
+        {enviando && (
+          <p role="status" className="cadastro-em-lote-panel__carregando">
+            Processando lote...
+          </p>
+        )}
+
+        {status === 'erro' && (
+          <p role="alert" className="cadastro-em-lote-panel__erro">
+            {mensagemErro}
+          </p>
+        )}
+
+        {status === 'sucesso' && resultado && (
+          <ul
+            className="cadastro-em-lote-panel__relatorio"
+            aria-label="Relatório do cadastro em lote"
+            data-testid="cadastro-em-lote-relatorio"
+          >
+            {resultado.length === 0 ? (
+              <li className="cadastro-em-lote-panel__relatorio-vazio">
+                Nenhuma linha foi enviada para processamento.
               </li>
-            ))
-          )}
-        </ul>
-      )}
+            ) : (
+              resultado.map((linha) => (
+                <li
+                  key={linha.numeroLinha}
+                  className={
+                    linha.aceita
+                      ? 'cadastro-em-lote-panel__relatorio-item cadastro-em-lote-panel__relatorio-item--aceita'
+                      : 'cadastro-em-lote-panel__relatorio-item cadastro-em-lote-panel__relatorio-item--rejeitada'
+                  }
+                  data-testid="cadastro-em-lote-linha"
+                >
+                  <span className="cadastro-em-lote-panel__relatorio-numero">
+                    Linha {linha.numeroLinha}:
+                  </span>{' '}
+                  <span className="cadastro-em-lote-panel__relatorio-texto">
+                    &quot;{linha.linha}&quot;
+                  </span>{' '}
+                  {linha.aceita ? (
+                    <span className="cadastro-em-lote-panel__relatorio-status">Aceita</span>
+                  ) : (
+                    <span className="cadastro-em-lote-panel__relatorio-status">
+                      Rejeitada
+                      {linha.motivoMensagem ? ` — ${linha.motivoMensagem}` : ''}
+                    </span>
+                  )}
+                </li>
+              ))
+            )}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }

@@ -406,6 +406,61 @@ describe('task routes (POST /tasks)', () => {
     });
   });
 
+  describe('POST /tasks/:id/finalizar', () => {
+    it('happy path: marca o Acordo_Atual como cumprido e a Task como concluída', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
+      const acordoAtual = await prisma.acordo.create({
+        data: { taskId: task.id, tipoAcordoId: tipoAcordo.id },
+      });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordoAtual.id } });
+
+      const res = await request(app).post(`/tasks/${task.id}/finalizar`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: acordoAtual.id, estadoCumprimento: 'cumprido' });
+
+      const taskAtualizada = await prisma.task.findUnique({ where: { id: task.id } });
+      expect(taskAtualizada?.concluida).toBe(true);
+    });
+
+    it('rejects a Task that does not exist with 404', async () => {
+      const res = await request(app).post('/tasks/nao-existe/finalizar');
+
+      expect(res.status).toBe(404);
+      expect(res.body).toHaveProperty('erro.codigo');
+      expect(res.body).toHaveProperty('erro.mensagem');
+    });
+
+    it('rejects a Task_Nova (sem Acordo_Atual) with 409', async () => {
+      const task = await prisma.task.create({ data: { titulo: 'Task_Nova sem acordo', ordemExibicao: 0 } });
+
+      const res = await request(app).post(`/tasks/${task.id}/finalizar`);
+
+      expect(res.status).toBe(409);
+      expect(res.body).toHaveProperty('erro.codigo');
+      expect(res.body).toHaveProperty('erro.mensagem');
+    });
+
+    it('remove a Task da Lista_de_Acordos após ser finalizada', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para deploy' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task a finalizar', ordemExibicao: 0 } });
+      const acordoAtual = await prisma.acordo.create({
+        data: { taskId: task.id, tipoAcordoId: tipoAcordo.id },
+      });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordoAtual.id } });
+
+      await request(app).post(`/tasks/${task.id}/finalizar`);
+
+      const listaRes = await request(app).get('/tasks');
+      const idsNaLista = [
+        ...listaRes.body.taskNova.map((t: { id: string }) => t.id),
+        ...listaRes.body.taskComAcordo.map((t: { id: string }) => t.id),
+      ];
+      expect(idsNaLista).not.toContain(task.id);
+    });
+  });
+
   describe('GET /tasks/:id/historico', () => {
     it('happy path: returns the Acordo history ordered by dataRegistro ascending (Requirement 7.1)', async () => {
       const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Avaliar e planejar' } });

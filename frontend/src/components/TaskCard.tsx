@@ -58,6 +58,11 @@
 // - "Ver histórico": abre `TaskHistoricoModal` (Requisito 7). Exibida
 //   para toda Task, independente de `onAcordoAlterado` — o modal é
 //   somente leitura e não precisa disparar um refresh da lista.
+// - "Finalizar": chama diretamente `POST /tasks/:id/finalizar`. Exibida
+//   somente para Task_Com_Acordo (Task_Nova não possui Acordo_Atual para
+//   marcar como cumprido). O backend marca o Acordo_Atual como cumprido e
+//   finaliza a atividade (`Task.concluida = true`) num único passo,
+//   independentemente do Tipo_de_Acordo do Acordo_Atual.
 //
 // Nota de design: o item da lista não expõe se o Acordo_Atual de uma
 // Task_Com_Acordo está pendente ou já avaliado (só expõe `alerta` e
@@ -75,7 +80,7 @@
 // isso em `ListaDeAcordosService`).
 
 import { useState, type FormEvent } from 'react';
-import { editarTask, listarUsuarios, removerTask, repetirUltimoAcordo } from '../api/client';
+import { editarTask, finalizarTask, listarUsuarios, removerTask, repetirUltimoAcordo } from '../api/client';
 import { ApiError } from '../api/errors';
 import type { TaskComAcordoItem, TaskNovaItem, UsuarioCadastrado } from '../api/types';
 import { AvaliarAcordoForm } from './AvaliarAcordoForm';
@@ -153,6 +158,9 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
   const [repetindo, setRepetindo] = useState(false);
   const [erroRepetir, setErroRepetir] = useState<string | null>(null);
 
+  const [finalizando, setFinalizando] = useState(false);
+  const [erroFinalizar, setErroFinalizar] = useState<string | null>(null);
+
   function handleRegistrado() {
     setPainelAberto('nenhum');
     onAcordoAlterado?.();
@@ -182,6 +190,28 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
       })
       .finally(() => {
         setRepetindo(false);
+      });
+  }
+
+  function handleFinalizar() {
+    if (finalizando) {
+      return;
+    }
+
+    setErroFinalizar(null);
+    setFinalizando(true);
+
+    finalizarTask(item.id)
+      .then(() => {
+        onAcordoAlterado?.();
+      })
+      .catch((error: unknown) => {
+        const mensagem =
+          error instanceof ApiError ? error.message : 'Não foi possível finalizar a Task.';
+        setErroFinalizar(mensagem);
+      })
+      .finally(() => {
+        setFinalizando(false);
       });
   }
 
@@ -449,6 +479,16 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
               {repetindo ? 'Repetindo...' : 'Repetir último acordo'}
             </button>
           )}
+          {onAcordoAlterado && comAcordo && (
+            <button
+              type="button"
+              onClick={handleFinalizar}
+              disabled={finalizando}
+              data-testid="task-card-finalizar"
+            >
+              {finalizando ? 'Finalizando...' : 'Finalizar'}
+            </button>
+          )}
           {onTaskRemovida && !confirmandoRemocao && (
             <button type="button" onClick={iniciarRemocao} data-testid="task-card-remover">
               Remover
@@ -509,6 +549,12 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
       {erroRepetir && (
         <p role="alert" className="task-card__erro" data-testid="task-card-erro-repetir">
           {erroRepetir}
+        </p>
+      )}
+
+      {erroFinalizar && (
+        <p role="alert" className="task-card__erro" data-testid="task-card-erro-finalizar">
+          {erroFinalizar}
         </p>
       )}
 

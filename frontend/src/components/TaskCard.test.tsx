@@ -4,11 +4,12 @@ import { TaskCard } from './TaskCard';
 import { ApiError } from '../api/errors';
 import type { TaskComAcordoItem, TaskNovaItem } from '../api/types';
 
-const { editarTask, removerTask, listarUsuarios, repetirUltimoAcordo } = vi.hoisted(() => ({
+const { editarTask, removerTask, listarUsuarios, repetirUltimoAcordo, finalizarTask } = vi.hoisted(() => ({
   editarTask: vi.fn(),
   removerTask: vi.fn(),
   listarUsuarios: vi.fn(),
   repetirUltimoAcordo: vi.fn(),
+  finalizarTask: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({
@@ -16,6 +17,7 @@ vi.mock('../api/client', () => ({
   removerTask,
   listarUsuarios,
   repetirUltimoAcordo,
+  finalizarTask,
 }));
 
 function criarTaskNova(overrides: Partial<TaskNovaItem> = {}): TaskNovaItem {
@@ -186,6 +188,60 @@ describe('TaskCard', () => {
       fireEvent.click(screen.getByTestId('task-card-repetir-ultimo-acordo'));
 
       expect(await screen.findByTestId('task-card-erro-repetir')).toHaveTextContent(
+        'A Task não possui Acordo_Atual.',
+      );
+      expect(onAcordoAlterado).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Finalizar', () => {
+    it('exibe o botão "Finalizar" apenas para Task_Com_Acordo quando onAcordoAlterado é informado', () => {
+      const { rerender } = render(
+        <TaskCard item={criarTaskComAcordo()} onAcordoAlterado={vi.fn()} />,
+      );
+      expect(screen.getByTestId('task-card-finalizar')).toBeInTheDocument();
+
+      rerender(<TaskCard item={criarTaskNova()} onAcordoAlterado={vi.fn()} />);
+      expect(screen.queryByTestId('task-card-finalizar')).not.toBeInTheDocument();
+    });
+
+    it('não exibe o botão quando onAcordoAlterado não é informado', () => {
+      render(<TaskCard item={criarTaskComAcordo()} />);
+      expect(screen.queryByTestId('task-card-finalizar')).not.toBeInTheDocument();
+    });
+
+    it('chama finalizarTask com o id da Task e onAcordoAlterado ao clicar no botão', async () => {
+      finalizarTask.mockResolvedValue({
+        id: 'acordo-1',
+        taskId: 'task-acordo-1',
+        tipoAcordoId: 'tipo-1',
+        dataRegistro: '2024-05-11T10:00:00.000Z',
+        estadoCumprimento: 'cumprido',
+        motivoNaoCumprimentoId: null,
+      });
+      const onAcordoAlterado = vi.fn();
+
+      render(
+        <TaskCard item={criarTaskComAcordo({ id: 'task-acordo-1' })} onAcordoAlterado={onAcordoAlterado} />,
+      );
+
+      fireEvent.click(screen.getByTestId('task-card-finalizar'));
+
+      expect(finalizarTask).toHaveBeenCalledWith('task-acordo-1');
+      await waitFor(() => expect(onAcordoAlterado).toHaveBeenCalled());
+    });
+
+    it('exibe erro e não chama onAcordoAlterado quando a API rejeita', async () => {
+      finalizarTask.mockRejectedValue(
+        new ApiError(409, 'SEM_ACORDO_ATUAL', 'A Task não possui Acordo_Atual.'),
+      );
+      const onAcordoAlterado = vi.fn();
+
+      render(<TaskCard item={criarTaskComAcordo()} onAcordoAlterado={onAcordoAlterado} />);
+
+      fireEvent.click(screen.getByTestId('task-card-finalizar'));
+
+      expect(await screen.findByTestId('task-card-erro-finalizar')).toHaveTextContent(
         'A Task não possui Acordo_Atual.',
       );
       expect(onAcordoAlterado).not.toHaveBeenCalled();

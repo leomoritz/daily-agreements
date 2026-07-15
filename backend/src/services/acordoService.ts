@@ -408,6 +408,31 @@ export class AcordoService {
       repeteAcordoNaoCumprido: !ehAvaliarEPlanejar,
     });
   }
+
+  /**
+   * "Finalizar" (ação manual): marca o Acordo_Atual da Task como cumprido
+   * e finaliza a atividade imediatamente, independentemente do
+   * Tipo_de_Acordo do Acordo_Atual — diferente da remoção lógica por
+   * conclusão feita por `avaliarAcordoAtual` (que só marca
+   * `Task.concluida = true` quando o Tipo_de_Acordo do Acordo_Atual é
+   * exatamente "Finalizar").
+   *
+   * Reutiliza `avaliarAcordoAtual(taskId, 'cumprido')` para toda a
+   * validação e os efeitos colaterais já existentes (Task não encontrada,
+   * Task sem Acordo_Atual, incremento/reset de contadores), e então força
+   * `Task.concluida = true` incondicionalmente — cobrindo também o caso
+   * em que o Tipo_de_Acordo do Acordo_Atual não é "Finalizar".
+   *
+   * Assim como na remoção lógica por conclusão, isso é apenas uma
+   * ocultação lógica: a Task e todo o seu histórico de Acordos
+   * permanecem no banco e continuam disponíveis para consulta (ex.: via
+   * histórico ou Atividades_Finalizadas).
+   */
+  async finalizarTask(taskId: string): Promise<Acordo> {
+    const acordo = await this.avaliarAcordoAtual(taskId, ESTADO_CUMPRIDO);
+    await this.taskRepository.update(taskId, { concluida: true });
+    return acordo;
+  }
 }
 
 /** Shared singleton instance, wired to the default (Prisma-backed) repositories and the real system clock. */
