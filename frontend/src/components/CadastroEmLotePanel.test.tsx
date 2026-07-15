@@ -35,6 +35,8 @@ describe('CadastroEmLotePanel', () => {
 
     render(<CadastroEmLotePanel />);
 
+    fireEvent.click(screen.getByRole('button', { name: /cadastro em lote/i }));
+
     const textarea = screen.getByLabelText(/tasks a cadastrar/i);
     fireEvent.change(textarea, {
       target: { value: 'Revisar contrato\n\nEnviar para deploy;Tipo Inexistente' },
@@ -68,6 +70,8 @@ describe('CadastroEmLotePanel', () => {
     );
 
     render(<CadastroEmLotePanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /cadastro em lote/i }));
 
     const textarea = screen.getByLabelText(/tasks a cadastrar/i);
     fireEvent.change(textarea, { target: { value: 'Revisar contrato' } });

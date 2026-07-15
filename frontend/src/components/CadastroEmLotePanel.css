@@ -8,6 +8,42 @@
   color: var(--color-text);
 }
 
+.cadastro-em-lote-panel__titulo-wrapper {
+  margin: 0;
+}
+
+.cadastro-em-lote-panel__cabecalho {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cadastro-em-lote-panel__titulo {
+  font-size: 1.17em;
+  font-weight: 600;
+}
+
+.cadastro-em-lote-panel__seta {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.cadastro-em-lote-panel__seta--aberta {
+  transform: rotate(-180deg);
+}
+
+.cadastro-em-lote-panel__conteudo {
+  margin-top: 1rem;
+}
+
 .cadastro-em-lote-panel__instrucoes {
   color: var(--color-text-muted);
   font-size: 0.9rem;
