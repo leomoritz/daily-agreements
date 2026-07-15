@@ -1,0 +1,71 @@
+// Prisma schema for Daily Agreements.
+// Data models per design.md "Data Models" section.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Task {
+  id                        String   @id @default(cuid())
+  titulo                    String
+  descricao                 String?
+  responsavelId             String?
+  numTentativas             Int      @default(0)
+  tentativasAvaliarPlanejar Int      @default(0)
+  repeteAcordoNaoCumprido   Boolean  @default(false)
+  ordemExibicao             Int
+  acordoAtualId             String?  @unique
+  concluida                 Boolean  @default(false)
+  criadaEm                  DateTime @default(now())
+
+  responsavel    UsuarioCadastrado? @relation("TaskResponsavel", fields: [responsavelId], references: [id])
+  acordoAtual    Acordo?            @relation("TaskAcordoAtual", fields: [acordoAtualId], references: [id])
+  acordos        Acordo[]           @relation("TaskAcordos")
+
+  @@index([responsavelId])
+}
+
+model Acordo {
+  id                     String            @id @default(cuid())
+  taskId                 String
+  tipoAcordoId           String
+  dataRegistro           DateTime          @default(now())
+  estadoCumprimento      String            @default("pendente")
+  motivoNaoCumprimentoId String?
+
+  task                   Task                  @relation("TaskAcordos", fields: [taskId], references: [id], onDelete: Cascade)
+  tipoAcordo             TipoAcordo            @relation(fields: [tipoAcordoId], references: [id])
+  motivoNaoCumprimento   MotivoNaoCumprimento? @relation(fields: [motivoNaoCumprimentoId], references: [id])
+  taskAtualDe            Task?                 @relation("TaskAcordoAtual")
+
+  @@index([taskId])
+  @@index([tipoAcordoId])
+  @@index([motivoNaoCumprimentoId])
+}
+
+model TipoAcordo {
+  id      String   @id @default(cuid())
+  nome    String   @unique
+
+  acordos Acordo[]
+}
+
+model MotivoNaoCumprimento {
+  id      String   @id @default(cuid())
+  nome    String   @unique
+
+  acordos Acordo[]
+}
+
+model UsuarioCadastrado {
+  id        String @id @default(cuid())
+  nomeLogin String @unique
+
+  tasks     Task[] @relation("TaskResponsavel")
+}

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.env
+.env.local
+.DS_Store
+
+# Prisma / SQLite
+backend/prisma/*.db
+backend/prisma/*.db-journal
+backend/generated/
+
+# Vite
+frontend/.vite/

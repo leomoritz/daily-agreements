@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+generated/
+**/generated/
+*.db
+*.db-journal
+.env
+.env.local
+**/.env
+**/.env.local
+.git/
+.kiro/
+.vscode/
+coverage/
+frontend/.vite/

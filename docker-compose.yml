@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - '3001:3001'
+    environment:
+      # Caminho dentro do volume `backend-db` (ver seção volumes), para que
+      # o SQLite persista entre restarts/recreates do container. Prisma
+      # resolve URLs `file:` relativas ao diretório do schema.prisma
+      # (backend/prisma/), por isso "../data/dev.db" aponta para
+      # backend/data/dev.db (o volume montado), e não backend/prisma/data.
+      DATABASE_URL: 'file:../data/dev.db'
+      PORT: '3001'
+    volumes:
+      - backend-db:/app/backend/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://localhost:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - '8081:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  # Persiste o arquivo SQLite (backend/data/dev.db) fora do container, para
+  # que os dados sobrevivam a `docker compose down`/rebuilds da imagem.
+  backend-db:

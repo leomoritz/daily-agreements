@@ -1,0 +1,73 @@
+.task-historico-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.task-historico-modal {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 32rem;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.task-historico-modal__cabecalho {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.task-historico-modal__titulo {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.task-historico-modal__fechar {
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+}
+
+.task-historico-modal__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.task-historico-modal__item {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.task-historico-modal__label {
+  font-weight: 600;
+}
+
+.task-historico-modal__tipo-acordo,
+.task-historico-modal__data-registro,
+.task-historico-modal__estado {
+  margin: 0.25rem 0;
+}
+
+.task-historico-modal__erro {
+  color: var(--color-danger);
+  font-weight: 600;
+}

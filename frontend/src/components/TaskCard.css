@@ -1,0 +1,87 @@
+.task-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  text-align: left;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.task-card--alerta {
+  background-color: var(--color-danger-bg);
+  border-color: var(--color-danger);
+}
+
+.task-card__titulo {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.task-card__label {
+  font-weight: 600;
+}
+
+.task-card__responsavel,
+.task-card__tipo-acordo,
+.task-card__data-registro {
+  margin: 0.25rem 0;
+}
+
+.task-card__alerta {
+  margin: 0.5rem 0 0 0;
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.task-card__alerta-badge {
+  display: inline-block;
+}
+
+.task-card__acoes {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.task-card__acoes--secundarias {
+  margin-top: 0.5rem;
+}
+
+.task-card__painel-acordo {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.task-card__confirmar-remocao {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.task-card__editar-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.task-card__campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.task-card__editar-acoes {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.task-card__erro {
+  margin: 0.5rem 0 0 0;
+  color: var(--color-danger);
+  font-weight: 600;
+}

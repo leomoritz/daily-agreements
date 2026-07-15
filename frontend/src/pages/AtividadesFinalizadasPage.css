@@ -1,0 +1,60 @@
+.atividades-finalizadas-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: left;
+}
+
+.atividades-finalizadas-page__lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.atividades-finalizadas-page__item {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.atividades-finalizadas-page__item--hoje {
+  background-color: var(--color-success-bg);
+  border-color: var(--color-success);
+}
+
+.atividades-finalizadas-page__titulo {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.1rem;
+}
+
+.atividades-finalizadas-page__label {
+  font-weight: 600;
+}
+
+.atividades-finalizadas-page__responsavel,
+.atividades-finalizadas-page__data-finalizacao {
+  margin: 0.25rem 0;
+}
+
+.atividades-finalizadas-page__destaque-hoje {
+  margin: 0.5rem 0 0 0;
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.atividades-finalizadas-page__destaque-badge {
+  display: inline-block;
+}
+
+.atividades-finalizadas-page__erro {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.atividades-finalizadas-page__vazio {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
