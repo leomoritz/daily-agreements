@@ -436,95 +436,104 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
         </>
       )}
 
-      {(onTaskEditada || onTaskRemovida || onAcordoAlterado) && (
-        <div className="task-card__acoes">
-          {onTaskEditada && (
-            <button type="button" onClick={iniciarEdicao} data-testid="task-card-editar">
-              Editar
-            </button>
-          )}
-          {onAcordoAlterado && (
+      <div className="task-card__acoes">
+        {onTaskEditada && (
+          <button type="button" onClick={iniciarEdicao} data-testid="task-card-editar">
+            Editar
+          </button>
+        )}
+        {onAcordoAlterado && (
+          <button
+            type="button"
+            onClick={() =>
+              setPainelAberto((atual) =>
+                atual === 'registrar-acordo' ? 'nenhum' : 'registrar-acordo',
+              )
+            }
+            data-testid="task-card-registrar-acordo"
+          >
+            Registrar Acordo
+          </button>
+        )}
+        {onAcordoAlterado && comAcordo && (
+          <button
+            type="button"
+            onClick={() =>
+              setPainelAberto((atual) =>
+                atual === 'avaliar-acordo' ? 'nenhum' : 'avaliar-acordo',
+              )
+            }
+            data-testid="task-card-avaliar-acordo"
+          >
+            Avaliar
+          </button>
+        )}
+        {onAcordoAlterado && comAcordo && (
+          <button
+            type="button"
+            onClick={handleRepetirUltimoAcordo}
+            disabled={repetindo}
+            data-testid="task-card-repetir-ultimo-acordo"
+          >
+            {repetindo ? 'Repetindo...' : 'Repetir último acordo'}
+          </button>
+        )}
+        {onAcordoAlterado && comAcordo && (
+          <button
+            type="button"
+            onClick={handleFinalizar}
+            disabled={finalizando}
+            data-testid="task-card-finalizar"
+          >
+            {finalizando ? 'Finalizando...' : 'Finalizar'}
+          </button>
+        )}
+        {onTaskRemovida && !confirmandoRemocao && (
+          <button type="button" onClick={iniciarRemocao} data-testid="task-card-remover">
+            Remover
+          </button>
+        )}
+        {onTaskRemovida && confirmandoRemocao && (
+          <span className="task-card__confirmar-remocao">
+            Remover esta Task permanentemente?
             <button
               type="button"
-              onClick={() =>
-                setPainelAberto((atual) =>
-                  atual === 'registrar-acordo' ? 'nenhum' : 'registrar-acordo',
-                )
-              }
-              data-testid="task-card-registrar-acordo"
+              onClick={handleConfirmarRemocao}
+              disabled={removendo}
+              data-testid="task-card-confirmar-remocao"
             >
-              Registrar Acordo
+              {removendo ? 'Removendo...' : 'Confirmar'}
             </button>
-          )}
-          {onAcordoAlterado && comAcordo && (
             <button
               type="button"
-              onClick={() =>
-                setPainelAberto((atual) =>
-                  atual === 'avaliar-acordo' ? 'nenhum' : 'avaliar-acordo',
-                )
-              }
-              data-testid="task-card-avaliar-acordo"
+              onClick={cancelarRemocao}
+              disabled={removendo}
+              data-testid="task-card-cancelar-remocao"
             >
-              Avaliar
+              Cancelar
             </button>
-          )}
-          {onAcordoAlterado && comAcordo && (
-            <button
-              type="button"
-              onClick={handleRepetirUltimoAcordo}
-              disabled={repetindo}
-              data-testid="task-card-repetir-ultimo-acordo"
-            >
-              {repetindo ? 'Repetindo...' : 'Repetir último acordo'}
-            </button>
-          )}
-          {onAcordoAlterado && comAcordo && (
-            <button
-              type="button"
-              onClick={handleFinalizar}
-              disabled={finalizando}
-              data-testid="task-card-finalizar"
-            >
-              {finalizando ? 'Finalizando...' : 'Finalizar'}
-            </button>
-          )}
-          {onTaskRemovida && !confirmandoRemocao && (
-            <button type="button" onClick={iniciarRemocao} data-testid="task-card-remover">
-              Remover
-            </button>
-          )}
-          {onTaskRemovida && confirmandoRemocao && (
-            <span className="task-card__confirmar-remocao">
-              Remover esta Task permanentemente?
-              <button
-                type="button"
-                onClick={handleConfirmarRemocao}
-                disabled={removendo}
-                data-testid="task-card-confirmar-remocao"
-              >
-                {removendo ? 'Removendo...' : 'Confirmar'}
-              </button>
-              <button
-                type="button"
-                onClick={cancelarRemocao}
-                disabled={removendo}
-                data-testid="task-card-cancelar-remocao"
-              >
-                Cancelar
-              </button>
-            </span>
-          )}
-        </div>
-      )}
-
-      <div className="task-card__acoes task-card__acoes--secundarias">
+          </span>
+        )}
         <button
           type="button"
+          className="task-card__botao-icone"
           onClick={() => setHistoricoAberto(true)}
+          title="Ver histórico"
+          aria-label="Ver histórico"
           data-testid="task-card-ver-historico"
         >
-          Ver histórico
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 3" />
+          </svg>
         </button>
       </div>
 

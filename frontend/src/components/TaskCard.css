@@ -41,13 +41,45 @@
 .task-card__acoes {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   margin-top: 0.75rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
 }
 
-.task-card__acoes--secundarias {
-  margin-top: 0.5rem;
+.task-card__acoes::-webkit-scrollbar {
+  height: 4px;
+}
+
+.task-card__acoes::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-strong);
+  border-radius: 4px;
+}
+
+.task-card__acoes::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+.task-card__acoes button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0.5em 0.9em;
+  font-size: 0.9rem;
+}
+
+.task-card__botao-icone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5em;
+  margin-left: auto;
+}
+
+.task-card__botao-icone svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .task-card__painel-acordo {
