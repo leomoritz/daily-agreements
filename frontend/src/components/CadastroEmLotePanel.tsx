@@ -62,6 +62,10 @@ export function CadastroEmLotePanel({ onProcessado }: CadastroEmLotePanelProps =
 
     processarLote(texto)
       .then((linhas) => {
+        // Limpa a caixa de entrada após o cadastro ser aceito pela API,
+        // deixando o campo vazio pronto para uma nova entrada (o relatório
+        // por linha abaixo continua comunicando o resultado de cada linha).
+        setTexto('');
         setResultado(linhas);
         setStatus('sucesso');
         onProcessado?.(linhas);

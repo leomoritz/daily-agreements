@@ -35,14 +35,14 @@ describe('CadastroEmLotePanel', () => {
 
     render(<CadastroEmLotePanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: /cadastro em lote/i }));
+    fireEvent.click(screen.getByRole('button', { name: /cadastrar novo acordo/i }));
 
     const textarea = screen.getByLabelText(/tasks a cadastrar/i);
     fireEvent.change(textarea, {
       target: { value: 'Revisar contrato\n\nEnviar para deploy;Tipo Inexistente' },
     });
 
-    const botaoSubmit = screen.getByRole('button', { name: /cadastrar em lote/i });
+    const botaoSubmit = screen.getByRole('button', { name: 'Cadastrar' });
     fireEvent.click(botaoSubmit);
 
     expect(processarLote).toHaveBeenCalledTimes(1);
@@ -71,16 +71,37 @@ describe('CadastroEmLotePanel', () => {
 
     render(<CadastroEmLotePanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: /cadastro em lote/i }));
+    fireEvent.click(screen.getByRole('button', { name: /cadastrar novo acordo/i }));
 
     const textarea = screen.getByLabelText(/tasks a cadastrar/i);
     fireEvent.change(textarea, { target: { value: 'Revisar contrato' } });
 
-    const botaoSubmit = screen.getByRole('button', { name: /cadastrar em lote/i });
+    const botaoSubmit = screen.getByRole('button', { name: 'Cadastrar' });
     fireEvent.click(botaoSubmit);
 
     const erro = await screen.findByRole('alert');
     expect(erro).toHaveTextContent('Falha ao processar o lote.');
     expect(screen.queryByTestId('cadastro-em-lote-relatorio')).not.toBeInTheDocument();
+  });
+
+  it('limpa a caixa de entrada após o cadastro ser aceito pela API (Bug 1)', async () => {
+    processarLote.mockResolvedValue([
+      { numeroLinha: 1, linha: 'Revisar contrato', aceita: true, taskId: 'task-1' },
+    ] satisfies ResultadoLinhaLote[]);
+
+    render(<CadastroEmLotePanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /cadastrar novo acordo/i }));
+
+    const textarea = screen.getByLabelText(/tasks a cadastrar/i) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'Revisar contrato' } });
+    expect(textarea.value).toBe('Revisar contrato');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cadastrar' }));
+
+    // Após o sucesso, o relatório aparece e o campo é limpo, pronto para
+    // uma nova entrada.
+    await screen.findByTestId('cadastro-em-lote-relatorio');
+    expect(textarea.value).toBe('');
   });
 });
