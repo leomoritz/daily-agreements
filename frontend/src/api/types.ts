@@ -58,6 +58,8 @@ export interface UsuarioCadastrado {
 export interface TaskNovaItem {
   id: string;
   titulo: string;
+  /** O id do Responsável atual, quando houver (Requisito 9.5). */
+  responsavelId?: string;
   responsavelNome?: string;
   ordemExibicao: number;
 }
@@ -70,10 +72,14 @@ export interface TaskNovaItem {
 export interface TaskComAcordoItem {
   id: string;
   titulo: string;
+  /** O id do Responsável atual, quando houver (Requisito 9.5). */
+  responsavelId?: string;
   responsavelNome?: string;
   ordemExibicao: number;
   tipoAcordoNome: string;
   dataRegistroAcordoAtual: string;
+  /** O estado de cumprimento corrente do Acordo_Atual (Requisitos 8.1, 8.4). */
+  estadoCumprimentoAcordoAtual: EstadoCumprimento;
   /**
    * Indicador de alerta ativo quando o Acordo_Atual está `nao_cumprido`
    * (Requisito 3.6), e também quando o Acordo_Atual é uma repetição (via
@@ -93,6 +99,13 @@ export interface TaskComAcordoItem {
   alertaTentativasAvaliarPlanejar: boolean;
   /** Contador de ciclos consecutivos de "Avaliar e planejar", acompanhando `alertaTentativasAvaliarPlanejar`. */
   tentativasAvaliarPlanejar: number;
+  /**
+   * O Ultimo_Motivo_Informado: nome do Motivo_de_Nao_Cumprimento associado
+   * ao Acordo mais recente da Task que possui um Motivo_de_Nao_Cumprimento
+   * associado, omitido quando nenhum Acordo da Task possui um (Requisitos
+   * 2.1, 2.3, 2.5, 2.6).
+   */
+  ultimoMotivoNome?: string;
 }
 
 /**
@@ -102,6 +115,23 @@ export interface TaskComAcordoItem {
 export interface ListaDeAcordos {
   taskNova: TaskNovaItem[];
   taskComAcordo: TaskComAcordoItem[];
+}
+
+/**
+ * Item da Lista_de_Acordos_Nao_Atualizados — ver
+ * backend/src/services/listaDeAcordosService.ts > TaskNaoAtualizadaItem,
+ * Requisitos 7.3–7.7, 7.10.
+ */
+export interface TaskNaoAtualizadaItem {
+  id: string;
+  titulo: string;
+  responsavelId?: string;
+  responsavelNome?: string;
+  ordemExibicao: number;
+  /** Ausente quando a Task não possui nenhum Acordo registrado (Requisitos 7.6, 7.10). */
+  dataUltimaAtualizacaoAcordo?: string;
+  /** Tipo_de_Acordo do Acordo_Atual, quando houver (Requisito 7.6). */
+  tipoAcordoNome?: string;
 }
 
 /**
@@ -151,16 +181,30 @@ export interface EditarTaskInput {
 export interface RegistrarAcordoInput {
   tipoAcordoId: string;
   responsavelId?: string;
+  /**
+   * Confirmação de que o Acordo_Atual (quando `pendente`) foi cumprido,
+   * exigida pelo Registro_de_Acordo_com_Avaliacao (Requisito 8.2). Ignorada
+   * quando a Task não possui Acordo_Atual pendente de avaliação.
+   */
+  confirmaCumprimentoAcordoAtual?: boolean;
 }
 
 /** Payload aceito por `avaliarAcordoAtual` (PATCH /tasks/:id/acordos/atual). */
 export interface AvaliarAcordoAtualInput {
   resultado: ResultadoAvaliacao;
   motivoId?: string;
+  /** Nome do Motivo_de_Nao_Cumprimento, resolvido/criado pelo backend (Requisitos 3.3–3.6). */
+  motivoNome?: string;
 }
 
 /**
- * `repetirUltimoAcordo` (POST /tasks/:id/acordos/repetir) não aceita
- * payload: o Tipo_de_Acordo e o Responsável do novo Acordo são derivados
- * pelo backend a partir do Acordo_Atual da Task.
+ * Payload opcional aceito por `repetirUltimoAcordo`
+ * (POST /tasks/:id/acordos/repetir): o Tipo_de_Acordo e o Responsável do
+ * novo Acordo continuam derivados pelo backend a partir do Acordo_Atual
+ * da Task; `motivoId`/`motivoNome` associam um Motivo_de_Nao_Cumprimento
+ * à avaliação do Acordo_Atual sendo repetido (Requisitos 4.2, 4.5).
  */
+export interface RepetirUltimoAcordoInput {
+  motivoId?: string;
+  motivoNome?: string;
+}

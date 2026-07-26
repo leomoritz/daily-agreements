@@ -6,14 +6,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './errors';
 import {
+  avaliarAcordoAtual,
   criarTask,
   editarTask,
   listarTiposDeAcordo,
+  obterAcordosNaoAtualizados,
   obterAtividadesFinalizadas,
   obterLista,
+  registrarAcordo,
   removerTask,
   removerUsuario,
   reordenarTask,
+  repetirUltimoAcordo,
 } from './client';
 
 function mockFetchOnce(response: Response): ReturnType<typeof vi.fn> {
@@ -138,5 +142,131 @@ describe('client', () => {
     );
 
     await expect(removerTask('inexistente')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('obterAcordosNaoAtualizados: faz GET /tasks/nao-atualizados e retorna a lista desserializada', async () => {
+    const naoAtualizados = [
+      { id: '1', titulo: 'Task sem acordo hoje', ordemExibicao: 0 },
+    ];
+    const fetchMock = mockFetchOnce(jsonResponse(200, naoAtualizados));
+
+    const resultado = await obterAcordosNaoAtualizados();
+
+    expect(resultado).toEqual(naoAtualizados);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/tasks/nao-atualizados');
+    expect(init.method).toBe('GET');
+  });
+
+  it('obterAcordosNaoAtualizados: propaga ApiError quando o backend responde com erro', async () => {
+    mockFetchOnce(
+      jsonResponse(500, { erro: { codigo: 'ERRO_INTERNO', mensagem: 'Falha inesperada.' } }),
+    );
+
+    await expect(obterAcordosNaoAtualizados()).rejects.toMatchObject({
+      status: 500,
+      codigo: 'ERRO_INTERNO',
+      message: 'Falha inesperada.',
+    });
+  });
+
+  it('repetirUltimoAcordo: faz POST /tasks/:id/acordos/repetir sem corpo quando chamado sem input', async () => {
+    const acordo = { id: '2', taskId: 'abc', tipoAcordoId: 'tipo-1', dataRegistro: '2026-07-13T10:00:00.000Z', estadoCumprimento: 'pendente', motivoNaoCumprimentoId: null };
+    const fetchMock = mockFetchOnce(jsonResponse(201, acordo));
+
+    const resultado = await repetirUltimoAcordo('abc');
+
+    expect(resultado).toEqual(acordo);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/tasks/abc/acordos/repetir');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeUndefined();
+  });
+
+  it('repetirUltimoAcordo: faz POST /tasks/:id/acordos/repetir com o corpo { motivoId?, motivoNome? } quando informado', async () => {
+    const acordo = { id: '2', taskId: 'abc', tipoAcordoId: 'tipo-1', dataRegistro: '2026-07-13T10:00:00.000Z', estadoCumprimento: 'pendente', motivoNaoCumprimentoId: null };
+    const fetchMock = mockFetchOnce(jsonResponse(201, acordo));
+
+    const resultado = await repetirUltimoAcordo('abc', { motivoId: 'motivo-1', motivoNome: 'Motivo digitado' });
+
+    expect(resultado).toEqual(acordo);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/tasks/abc/acordos/repetir');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ motivoId: 'motivo-1', motivoNome: 'Motivo digitado' });
+  });
+
+  it('registrarAcordo: envia confirmaCumprimentoAcordoAtual no corpo quando informado', async () => {
+    const acordo = { id: '3', taskId: 'abc', tipoAcordoId: 'tipo-1', dataRegistro: '2026-07-13T10:00:00.000Z', estadoCumprimento: 'pendente', motivoNaoCumprimentoId: null };
+    const fetchMock = mockFetchOnce(jsonResponse(201, acordo));
+
+    const input = { tipoAcordoId: 'tipo-1', confirmaCumprimentoAcordoAtual: true };
+    const resultado = await registrarAcordo('abc', input);
+
+    expect(resultado).toEqual(acordo);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/tasks/abc/acordos');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual(input);
+  });
+
+  it('avaliarAcordoAtual: envia motivoNome no corpo quando informado', async () => {
+    const acordo = { id: '3', taskId: 'abc', tipoAcordoId: 'tipo-1', dataRegistro: '2026-07-13T10:00:00.000Z', estadoCumprimento: 'nao_cumprido', motivoNaoCumprimentoId: 'motivo-1' };
+    const fetchMock = mockFetchOnce(jsonResponse(200, acordo));
+
+    const input = { resultado: 'nao_cumprido' as const, motivoNome: 'Motivo digitado' };
+    const resultado = await avaliarAcordoAtual('abc', input);
+
+    expect(resultado).toEqual(acordo);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe('/tasks/abc/acordos/atual');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual(input);
+  });
+
+  describe('timeout traduzido em ApiError de falha de comunicação', () => {
+    // O fetch mock nunca resolve por conta própria — apenas rejeita com
+    // AbortError quando o `AbortController` (criado pelo wrapper em
+    // ./http.ts) aborta o `signal`, replicando o comportamento real do
+    // `fetch` diante de um `AbortController.abort()`.
+    function mockFetchNuncaResolve(): void {
+      const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('operação de Acordo (registrarAcordo): timeout de 30s rejeita com ApiError ERRO_COMUNICACAO', async () => {
+      vi.useFakeTimers();
+      mockFetchNuncaResolve();
+
+      const expectativa = expect(
+        registrarAcordo('abc', { tipoAcordoId: 'tipo-1' }),
+      ).rejects.toMatchObject({ status: 0, codigo: 'ERRO_COMUNICACAO' });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expectativa;
+    });
+
+    it('obterAcordosNaoAtualizados: timeout de 3s rejeita com ApiError ERRO_COMUNICACAO', async () => {
+      vi.useFakeTimers();
+      mockFetchNuncaResolve();
+
+      const expectativa = expect(obterAcordosNaoAtualizados()).rejects.toMatchObject({
+        status: 0,
+        codigo: 'ERRO_COMUNICACAO',
+      });
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expectativa;
+    });
   });
 });

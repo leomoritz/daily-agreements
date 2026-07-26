@@ -24,6 +24,7 @@
 
 import { TaskRepository } from '../repositories/taskRepository.js';
 import type { TaskWithAcordosEResponsavel } from '../repositories/taskRepository.js';
+import { mesmoDia } from '../utils/data.js';
 
 const ESTADO_CUMPRIDO = 'cumprido';
 const TIPO_ACORDO_FINALIZAR = 'Finalizar';
@@ -40,14 +41,6 @@ export interface AtividadeFinalizadaItem {
   dataFinalizacao: Date;
   /** `true` quando `dataFinalizacao` cai no dia calendário atual (Requisito de destaque). */
   finalizadaHoje: boolean;
-}
-
-function mesmoDia(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
 }
 
 export class AtividadesFinalizadasService {

@@ -1,13 +1,14 @@
 // Smoke end-to-end test (task 28.3) covering the full flow: cadastrar
-// Task → registrar Acordo → avaliar → registrar próximo Acordo, ponta a
-// ponta contra a API real (Express + Prisma/SQLite), complementando
-// (sem duplicar) os testes por rota já existentes em taskRoutes.test.ts.
+// Task → registrar Acordo → registrar próximo Acordo com avaliação do
+// Acordo_Atual (Registro_de_Acordo_com_Avaliacao), ponta a ponta contra
+// a API real (Express + Prisma/SQLite), complementando (sem duplicar)
+// os testes por rota já existentes em taskRoutes.test.ts.
 //
 // Segue o mesmo padrão de banco SQLite isolado em diretório temporário
 // usado por taskRoutes.test.ts, com um prefixo de diretório distinto
 // para não colidir caso os arquivos de teste rodem em paralelo.
 //
-// _Requirements: 1.1, 2.1, 4.1, 5.1_
+// _Requirements: 1.1, 2.1, 5.1, 8.2, 8.6, 10.1_
 
 import express, { type Express } from 'express';
 import { execFileSync } from 'node:child_process';
@@ -62,7 +63,7 @@ describe('smoke e2e: Task → Acordo → avaliação → próximo Acordo', () =>
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('runs the full flow end-to-end through the real HTTP + persistence stack (Requirements 1.1, 2.1, 4.1, 5.1)', async () => {
+  it('runs the full flow end-to-end through the real HTTP + persistence stack (Requirements 1.1, 2.1, 5.1, 8.2, 8.6, 10.1)', async () => {
     // Setup: Tipo_de_Acordo e Usuário_Cadastrado diretamente via Prisma,
     // como já é feito em taskRoutes.test.ts.
     const tipoAcordo = await prisma.tipoAcordo.create({
@@ -100,24 +101,18 @@ describe('smoke e2e: Task → Acordo → avaliação → próximo Acordo', () =>
     const taskAposPrimeiroAcordo = await prisma.task.findUnique({ where: { id: taskId } });
     expect(taskAposPrimeiroAcordo?.acordoAtualId).toBe(primeiroAcordoId);
 
-    // 3. PATCH /tasks/:id/acordos/atual — avalia o Acordo_Atual como
-    // cumprido (Requirement 4.1).
-    const avaliarRes = await request(app)
-      .patch(`/tasks/${taskId}/acordos/atual`)
-      .send({ resultado: 'cumprido' });
-
-    expect(avaliarRes.status).toBe(200);
-    expect(avaliarRes.body).toMatchObject({
-      id: primeiroAcordoId,
-      estadoCumprimento: 'cumprido',
-    });
-
-    // 4. POST /tasks/:id/acordos novamente — registra o próximo Acordo
-    // (Requirement 5.1), agora que o anterior foi avaliado. Substitui o
-    // Acordo_Atual anterior.
+    // 3. POST /tasks/:id/acordos com confirmaCumprimentoAcordoAtual: true
+    // — Registro_de_Acordo_com_Avaliacao (Requirements 8.2, 8.6, 10.1):
+    // avalia o Acordo_Atual pendente como cumprido e registra o próximo
+    // Acordo atomicamente, refletindo o fluxo real da nova interface
+    // (não há mais um passo de avaliação isolado via PATCH).
     const segundoAcordoRes = await request(app)
       .post(`/tasks/${taskId}/acordos`)
-      .send({ tipoAcordoId: tipoAcordo.id, responsavelId: usuario.id });
+      .send({
+        tipoAcordoId: tipoAcordo.id,
+        responsavelId: usuario.id,
+        confirmaCumprimentoAcordoAtual: true,
+      });
 
     expect(segundoAcordoRes.status).toBe(201);
     expect(segundoAcordoRes.body).toMatchObject({
@@ -131,7 +126,7 @@ describe('smoke e2e: Task → Acordo → avaliação → próximo Acordo', () =>
     const taskAposSegundoAcordo = await prisma.task.findUnique({ where: { id: taskId } });
     expect(taskAposSegundoAcordo?.acordoAtualId).toBe(segundoAcordoId);
 
-    // 5. GET /tasks/:id/historico — confirma que ambos os Acordos
+    // 4. GET /tasks/:id/historico — confirma que ambos os Acordos
     // persistiram e aparecem no histórico completo.
     const historicoRes = await request(app).get(`/tasks/${taskId}/historico`);
 
