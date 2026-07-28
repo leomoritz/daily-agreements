@@ -6,6 +6,10 @@ coverage/
 .env
 .env.local
 .DS_Store
+database_start.sqlite
+database.sqlite
+8081
+ecosystem.config.cjs
 
 # Prisma / SQLite
 backend/prisma/*.db
