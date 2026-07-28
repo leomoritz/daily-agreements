@@ -16,6 +16,7 @@ import type { AcordoCreateData, AcordoRepository, AcordoUpdateData } from '../re
 import type { CadastroRepository } from '../repositories/cadastroRepository.js';
 import type { TaskCreateData, TaskRepository, TaskUpdateData } from '../repositories/taskRepository.js';
 import { AcordoService } from './acordoService.js';
+import type { TransactionRunner } from './acordoService.js';
 import { ConflictError, NotFoundError, ValidationError } from './errors.js';
 
 /** In-memory fake of TaskRepository, exposing the same public surface used by AcordoService. */
@@ -61,6 +62,19 @@ class InMemoryTaskRepository {
   async listActive(): Promise<Task[]> {
     return [...this.tasks.values()].filter((t) => !t.concluida);
   }
+
+  /** Snapshot completo do estado interno, usado por um TransactionRunner de teste que simula rollback (task 3.13). */
+  snapshot(): Map<string, Task> {
+    return new Map([...this.tasks.entries()].map(([id, task]) => [id, { ...task }]));
+  }
+
+  /** Restaura o estado interno a partir de um snapshot anterior (task 3.13). */
+  restore(snapshot: Map<string, Task>): void {
+    this.tasks.clear();
+    for (const [id, task] of snapshot) {
+      this.tasks.set(id, { ...task });
+    }
+  }
 }
 
 /** In-memory fake of AcordoRepository, exposing the same public surface used by AcordoService. */
@@ -99,6 +113,19 @@ class InMemoryAcordoRepository {
     this.acordos.set(id, updated);
     return updated;
   }
+
+  /** Snapshot completo do estado interno, usado por um TransactionRunner de teste que simula rollback (task 3.13). */
+  snapshot(): Map<string, Acordo> {
+    return new Map([...this.acordos.entries()].map(([id, acordo]) => [id, { ...acordo }]));
+  }
+
+  /** Restaura o estado interno a partir de um snapshot anterior (task 3.13). */
+  restore(snapshot: Map<string, Acordo>): void {
+    this.acordos.clear();
+    for (const [id, acordo] of snapshot) {
+      this.acordos.set(id, { ...acordo });
+    }
+  }
 }
 
 /** In-memory fake of a CadastroRepository lookup (TipoAcordo/UsuarioCadastrado), exposing only `findById`. */
@@ -132,9 +159,93 @@ class InMemoryTipoAcordoLookup implements Pick<CadastroRepository<{ id: string; 
   }
 }
 
+/**
+ * In-memory fake of the Cadastro_de_Motivos_de_Nao_Cumprimento lookup used
+ * by the private `resolverMotivo` (task 2.1): supports id lookup (existing
+ * behaviour), case-insensitive name lookup and inline creation (Requirements
+ * 3.4, 3.5, 10.7). Exposes `list()` in addition, purely for test assertions
+ * on the resulting cadastro state — not part of the surface `resolverMotivo`
+ * itself depends on.
+ */
+class InMemoryMotivoRepository {
+  private readonly rows: { id: string; nome: string }[] = [];
+
+  constructor(nomesIniciais: string[] = []) {
+    for (const nome of nomesIniciais) {
+      this.rows.push({ id: randomUUID(), nome });
+    }
+  }
+
+  async findById(id: string): Promise<{ id: string; nome: string } | null> {
+    return this.rows.find((r) => r.id === id) ?? null;
+  }
+
+  async findByNomeCaseInsensitive(nome: string): Promise<{ id: string; nome: string } | null> {
+    const target = nome.toLowerCase();
+    return this.rows.find((r) => r.nome.toLowerCase() === target) ?? null;
+  }
+
+  async add(data: { nome: string }): Promise<{ id: string; nome: string }> {
+    const row = { id: randomUUID(), nome: data.nome };
+    this.rows.push(row);
+    return row;
+  }
+
+  async list(): Promise<{ id: string; nome: string }[]> {
+    return [...this.rows];
+  }
+
+  /** Snapshot completo do estado interno, usado por um TransactionRunner de teste que simula rollback (task 3.13). */
+  snapshot(): { id: string; nome: string }[] {
+    return this.rows.map((r) => ({ ...r }));
+  }
+
+  /** Restaura o estado interno a partir de um snapshot anterior (task 3.13). */
+  restore(snapshot: { id: string; nome: string }[]): void {
+    this.rows.length = 0;
+    for (const row of snapshot) {
+      this.rows.push({ ...row });
+    }
+  }
+}
+
 /** Builds a fresh Task_Nova (no acordoAtualId) via an in-memory TaskRepository. */
 async function criarTaskNova(taskRepository: InMemoryTaskRepository, titulo: string): Promise<Task> {
   return taskRepository.create({ titulo, ordemExibicao: 0 });
+}
+
+/**
+ * Builds an AcordoService for tests, injecting a *passthrough*
+ * TransactionRunner (`(fn) => fn(svc)`) instead of the default
+ * `prisma.$transaction`-based one (task 1.2, Requirement 10.1). This keeps
+ * every composed operation that runs inside `runTransaction` (e.g.
+ * `repetirUltimoAcordo`, `marcarNaoCumprido`) operating on this very same
+ * instance and its in-memory fake repositories, so the existing test suite
+ * never attempts to open a real Prisma transaction.
+ *
+ * Forwards every argument as-is to the `AcordoService` constructor, so all
+ * existing call sites keep working unchanged — only the transactionRunner
+ * argument (not otherwise settable by callers) is added.
+ */
+function construirAcordoServicoDeTeste(
+  taskRepository?: ConstructorParameters<typeof AcordoService>[0],
+  acordoRepository?: ConstructorParameters<typeof AcordoService>[1],
+  tipoAcordoRepo?: ConstructorParameters<typeof AcordoService>[2],
+  usuarioRepo?: ConstructorParameters<typeof AcordoService>[3],
+  clock?: ConstructorParameters<typeof AcordoService>[4],
+  motivoNaoCumprimentoRepo?: ConstructorParameters<typeof AcordoService>[5],
+): AcordoService {
+  let svc: AcordoService;
+  svc = new AcordoService(
+    taskRepository,
+    acordoRepository,
+    tipoAcordoRepo,
+    usuarioRepo,
+    clock,
+    motivoNaoCumprimentoRepo,
+    (fn) => fn(svc),
+  );
+  return svc;
 }
 
 describe('AcordoService.registrarAcordo', () => {
@@ -151,7 +262,7 @@ describe('AcordoService.registrarAcordo', () => {
           const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoId]);
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -208,7 +319,7 @@ describe('AcordoService.registrarAcordo', () => {
           const tipoAcordoRepository = new InMemoryCadastroLookup([]);
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -251,7 +362,7 @@ describe('AcordoService.registrarAcordo', () => {
           const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoIdInicial, tipoAcordoIdTentativa]);
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -267,10 +378,18 @@ describe('AcordoService.registrarAcordo', () => {
           expect(taskComAcordoPendente!.acordoAtualId).toBe(acordoAtual.id);
 
           // qualquer tentativa de registrar um novo Acordo enquanto o Acordo_Atual
-          // ainda não foi avaliado deve ser rejeitada
-          await expect(
-            service.registrarAcordo(taskNova.id, tipoAcordoIdTentativa),
-          ).rejects.toThrow(ConflictError);
+          // ainda não foi avaliado, sem confirmar o cumprimento, deve ser
+          // rejeitada com ValidationError CONFIRMACAO_CUMPRIMENTO_OBRIGATORIA
+          // (Requirement 8.11 — substitui o antigo ConflictError
+          // ACORDO_ATUAL_PENDENTE)
+          let erroCapturado: unknown;
+          try {
+            await service.registrarAcordo(taskNova.id, tipoAcordoIdTentativa);
+          } catch (erro) {
+            erroCapturado = erro;
+          }
+          expect(erroCapturado).toBeInstanceOf(ValidationError);
+          expect((erroCapturado as ValidationError).codigo).toBe('CONFIRMACAO_CUMPRIMENTO_OBRIGATORIA');
 
           // o Acordo_Atual existente permanece inalterado
           const taskDepois = await taskRepository.findById(taskNova.id);
@@ -281,6 +400,25 @@ describe('AcordoService.registrarAcordo', () => {
           expect(historico).toHaveLength(1);
           expect(historico[0]!.id).toBe(acordoAtual.id);
           expect(historico[0]!.estadoCumprimento).toBe('pendente');
+
+          // com a confirmação de cumprimento, o registro é aceito: o
+          // Acordo_Atual anterior é avaliado como cumprido e um novo Acordo
+          // pendente passa a ser o Acordo_Atual (Registro_de_Acordo_com_Avaliacao)
+          const novoAcordo = await service.registrarAcordo(taskNova.id, tipoAcordoIdTentativa, undefined, {
+            confirmaCumprimentoAcordoAtual: true,
+          });
+          expect(novoAcordo.estadoCumprimento).toBe('pendente');
+          expect(novoAcordo.id).not.toBe(acordoAtual.id);
+
+          const taskAposConfirmacao = await taskRepository.findById(taskNova.id);
+          expect(taskAposConfirmacao!.acordoAtualId).toBe(novoAcordo.id);
+
+          const historicoAposConfirmacao = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          expect(historicoAposConfirmacao).toHaveLength(2);
+          expect(historicoAposConfirmacao[0]!.id).toBe(acordoAtual.id);
+          expect(historicoAposConfirmacao[0]!.estadoCumprimento).toBe('cumprido');
+          expect(historicoAposConfirmacao[1]!.id).toBe(novoAcordo.id);
+          expect(historicoAposConfirmacao[1]!.estadoCumprimento).toBe('pendente');
         },
       ),
       { numRuns: 100 },
@@ -338,7 +476,7 @@ describe('AcordoService.registrarAcordo', () => {
           const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoIdInicial, tipoAcordoIdProximo]);
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -421,7 +559,7 @@ describe('AcordoService.registrarAcordo', () => {
           // Cadastro_de_Usuários contém apenas responsavelIdValido; responsavelIdInvalido nunca pertence a ele.
           const usuarioCadastradoRepository = new InMemoryCadastroLookup([responsavelIdValido]);
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -503,7 +641,7 @@ describe('AcordoService.registrarAcordo', () => {
       const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoIdInicial, tipoAcordoIdProximo]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup([responsavelIdValido]);
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -571,7 +709,7 @@ describe('AcordoService.registrarAcordo', () => {
       // avalia esse Acordo_Atual e registra outro próximo Acordo, agora sem informar responsavelId
       await cenario.acordoRepository.update(taskComResponsavel!.acordoAtualId!, { estadoCumprimento: 'cumprido' });
       const outroTipoAcordoId = randomUUID();
-      const cenarioComTipoExtra = new AcordoService(
+      const cenarioComTipoExtra = construirAcordoServicoDeTeste(
         cenario.taskRepository as unknown as TaskRepository,
         cenario.acordoRepository as unknown as AcordoRepository,
         new InMemoryCadastroLookup([outroTipoAcordoId]),
@@ -618,7 +756,7 @@ describe('AcordoService.registrarAcordo', () => {
       const dataMockada = new Date('2030-01-15T10:30:00.000Z');
       const clockMockado = vi.fn<() => Date>(() => dataMockada);
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -649,7 +787,7 @@ describe('AcordoService.registrarAcordo', () => {
       let chamada = 0;
       const clockMockado = vi.fn<() => Date>(() => instantes[chamada++]!);
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -675,7 +813,7 @@ describe('AcordoService.registrarAcordo', () => {
       const dataDoClock = new Date('2030-01-15T10:30:00.000Z');
       const clockMockado = vi.fn<() => Date>(() => dataDoClock);
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -731,7 +869,7 @@ describe('AcordoService.registrarAcordo — cadeia de "Avaliar e planejar" conse
     );
     const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -807,7 +945,7 @@ describe('AcordoService.registrarAcordo — cadeia de "Avaliar e planejar" conse
     expect(taskDepois!.tentativasAvaliarPlanejar).toBe(0);
   });
 
-  it('reinicia o contador quando o Acordo_Atual anterior "Avaliar e planejar" foi avaliado como não cumprido', async () => {
+  it('bloqueia a avaliação como não cumprido do Acordo_Atual "Avaliar e planejar" e preserva o contador da cadeia (Requirement 5.2)', async () => {
     const idAvaliarPlanejar = randomUUID();
     const { service, taskRepository, taskId } = await montarCenarioComTipos({
       [idAvaliarPlanejar]: NOME_AVALIAR_E_PLANEJAR,
@@ -820,15 +958,26 @@ describe('AcordoService.registrarAcordo — cadeia de "Avaliar e planejar" conse
     const taskComUmaTentativa = await taskRepository.findById(taskId);
     expect(taskComUmaTentativa!.tentativasAvaliarPlanejar).toBe(1);
 
-    // o próximo Acordo "Avaliar e planejar" é avaliado como não cumprido,
-    // quebrando a cadeia de sucessos consecutivos
-    await service.avaliarAcordoAtual(taskId, 'nao_cumprido');
-    await service.registrarAcordo(taskId, idAvaliarPlanejar);
+    // "Avaliar e planejar" nunca é avaliado como não cumprido (Requirement
+    // 5.2): a tentativa é rejeitada antes de qualquer escrita, e a cadeia
+    // de tentativasAvaliarPlanejar permanece exatamente como estava.
+    let erroCapturado: unknown;
+    try {
+      await service.avaliarAcordoAtual(taskId, 'nao_cumprido');
+    } catch (erro) {
+      erroCapturado = erro;
+    }
+
+    expect(erroCapturado).toBeInstanceOf(ConflictError);
+    expect((erroCapturado as ConflictError).codigo).toBe(
+      'ACORDO_AVALIAR_PLANEJAR_NAO_CUMPRIMENTO_BLOQUEADO',
+    );
 
     const taskDepois = await taskRepository.findById(taskId);
-    expect(taskDepois!.tentativasAvaliarPlanejar).toBe(0);
-    // o não cumprimento incrementa numTentativas normalmente, sem relação com este contador
-    expect(taskDepois!.numTentativas).toBe(1);
+    expect(taskDepois!.tentativasAvaliarPlanejar).toBe(1);
+    // a rejeição não afeta numTentativas, que só é incrementado em um
+    // não cumprimento efetivamente processado
+    expect(taskDepois!.numTentativas).toBe(0);
   });
 
   it('não incrementa no primeiro Acordo de uma Task_Nova (sem Acordo_Atual anterior)', async () => {
@@ -885,6 +1034,20 @@ describe('AcordoService.registrarAcordo — cadeia de "Avaliar e planejar" conse
           let contadorEsperado = 0;
 
           for (const ciclo of ciclos) {
+            // "Avaliar e planejar" nunca é avaliado como não cumprido
+            // (Requirement 5.2): a operação é rejeitada antes de qualquer
+            // escrita, o contador permanece inalterado, e a sequência para
+            // aqui — não há um novo Acordo_Atual para continuar o ciclo.
+            if (tipoAtual === 'avaliarPlanejar' && ciclo.resultado === 'nao_cumprido') {
+              await expect(service.avaliarAcordoAtual(taskId, ciclo.resultado)).rejects.toThrow(
+                ConflictError,
+              );
+
+              const task = await taskRepository.findById(taskId);
+              expect(task!.tentativasAvaliarPlanejar).toBe(contadorEsperado);
+              return;
+            }
+
             await service.avaliarAcordoAtual(taskId, ciclo.resultado);
 
             const incrementaEsperado =
@@ -923,7 +1086,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
           const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoId]);
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -989,7 +1152,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
           const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoId]);
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -1097,7 +1260,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
           // motivoIdInvalido nunca pertence a ele.
           const motivoNaoCumprimentoRepository = new InMemoryCadastroLookup([motivoIdValido]);
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -1209,7 +1372,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
           const tipoAcordoRepository = new InMemoryCadastroLookup();
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -1258,7 +1421,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1290,7 +1453,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1315,7 +1478,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1340,7 +1503,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1393,7 +1556,7 @@ describe('AcordoService.avaliarAcordoAtual', () => {
           ]);
           const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-          const service = new AcordoService(
+          const service = construirAcordoServicoDeTeste(
             taskRepository as unknown as TaskRepository,
             acordoRepository as unknown as AcordoRepository,
             tipoAcordoRepository,
@@ -1449,6 +1612,820 @@ describe('AcordoService.avaliarAcordoAtual', () => {
       { numRuns: 100 },
     );
   });
+
+  // Property 6: Resolução do motivo e idempotência da criação inline
+  // Validates: Requirements 3.3, 3.4, 3.5, 3.6, 10.7
+  //
+  // Exercises `avaliarAcordoAtual(taskId, 'nao_cumprido', { motivoNome })`
+  // — the only public entrypoint that reaches the private `resolverMotivo`
+  // (task 2.1) — against the four mutually exclusive outcomes defined by
+  // Requirements 3.3-3.6. `resolverMotivo`'s case-insensitive match is a
+  // plain `.toLowerCase()` comparison (see cadastroRepository.ts's
+  // `findByNomeCaseInsensitive`): it folds letter case (including
+  // accented letters, e.g. 'Á'.toLowerCase() === 'á') but does NOT treat
+  // different base letters (accented vs. unaccented) as equivalent — so
+  // "accented variants" here means the generated names may contain
+  // accented characters as literal content, matched by re-casing that
+  // same exact text, not by swapping in different diacritics.
+  // - 'vazio': `motivoNome` trims to 0 characters (including a
+  //   whitespace-only string, or the field omitted entirely) -> no motivo
+  //   is associated (`null`) and the Cadastro_de_Motivos_de_Nao_Cumprimento
+  //   is left with the exact same values (Requirement 3.6).
+  // - 'novo': a genuinely new `motivoNome`, 1-100 characters after trim,
+  //   that does not match (case-insensitively) any value already in the
+  //   cadastro -> exactly 1 new value is created with the trimmed text,
+  //   and its id is associated to the Acordo_Atual (Requirement 3.4).
+  // - 'existente': a `motivoNome` that matches, case-insensitively, one
+  //   already-cadastrado value — rendered with mixed case over the exact
+  //   same (possibly accented) characters -> the existing id is used, and
+  //   the cadastro's count and texts stay unchanged (Requirement 3.5).
+  // - 'idempotencia': the exact same new name is confirmed twice in a row
+  //   for two distinct Tasks sharing the same starting cadastro -> the
+  //   second confirmation never creates a duplicate cadastro entry
+  //   (Requirement 10.7).
+  //
+  // `cadastroInicial` varies between empty and non-empty across runs
+  // (including the empty case, Requirement 3.2's "cadastro vazio"), and
+  // the name generators cover the 1 and 100 character boundaries (the 0
+  // character boundary is covered by the 'vazio' branch) plus surrounding
+  // whitespace and mixed case.
+  it('Feature: melhorias-acordos, Property 6: Resolução do motivo e idempotência da criação inline', async () => {
+    /** A non-whitespace character, safe for building names whose length survives trim(). */
+    const charNaoEspacoArb = fc.char().filter((c) => c.trim().length > 0);
+
+    /** A name whose trim() has exactly 1 character. */
+    const nomeUmCaractereArb = charNaoEspacoArb;
+
+    /** A name whose trim() has exactly 100 characters (the upper boundary). */
+    const nomeCemCaracteresArb = fc
+      .array(charNaoEspacoArb, { minLength: 100, maxLength: 100 })
+      .map((chars) => chars.join(''));
+
+    /** A name whose trim() has between 2 and 99 characters. */
+    const nomeMeioArb = fc
+      .array(charNaoEspacoArb, { minLength: 2, maxLength: 99 })
+      .map((chars) => chars.join(''));
+
+    /** A new motivo name (1-100 characters after trim), covering the length boundaries. */
+    const nomeNovoArb = fc.oneof(nomeUmCaractereArb, nomeCemCaracteresArb, nomeMeioArb);
+
+    /** Any whitespace-only (space/tab/newline) string: trim() results in an empty string, or absence of the field. */
+    const motivoVazioArb = fc.oneof(
+      fc.constant(undefined),
+      fc.stringOf(fc.constantFrom(' ', '\t', '\n', '\r'), { maxLength: 10 }),
+    );
+
+    /** Optional leading/trailing whitespace, trimmed away before comparison/storage. */
+    const espacosOpcionaisArb = fc.stringOf(fc.constantFrom(' ', '\t', '\n'), { maxLength: 5 });
+
+    /** A short name built from a pt-BR-flavored pool including accented letters, used by the 'existente' branch. */
+    const palavraComAcentoArb = fc
+      .array(
+        fc.constantFrom('a', 'á', 'à', 'â', 'ã', 'e', 'é', 'ê', 'i', 'í', 'o', 'ó', 'õ', 'u', 'ú', 'c', 'ç'),
+        { minLength: 1, maxLength: 15 },
+      )
+      .map((letras) => letras.join(''));
+
+    /** Enough independent booleans to re-case any generated name (max length used above is 100). */
+    const casingBitsArb = fc.array(fc.boolean(), { minLength: 100, maxLength: 100 });
+
+    /** Re-cases each character of `texto` per `bits[i]` (true -> uppercase, false -> lowercase); non-letters are unaffected by (to/from)UpperCase. */
+    function aplicarCasing(texto: string, bits: boolean[]): string {
+      return texto
+        .split('')
+        .map((char, i) => (bits[i] ? char.toUpperCase() : char.toLowerCase()))
+        .join('');
+    }
+
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 30 }),
+        fc.uuid(),
+        // cadastro inicial: 0 a 4 valores distintos já cadastrados (Requirement 3.2's "cadastro vazio" quando o array é []).
+        fc.array(nomeMeioArb, { minLength: 0, maxLength: 4 }),
+        fc.constantFrom<'vazio' | 'novo' | 'existente' | 'idempotencia'>(
+          'vazio',
+          'novo',
+          'existente',
+          'idempotencia',
+        ),
+        motivoVazioArb,
+        nomeNovoArb,
+        espacosOpcionaisArb,
+        espacosOpcionaisArb,
+        palavraComAcentoArb,
+        casingBitsArb,
+        casingBitsArb,
+        async (
+          titulo,
+          tipoAcordoId,
+          outrosValoresCadastrados,
+          branch,
+          nomeVazio,
+          nomeNovo,
+          espacosAntes,
+          espacosDepois,
+          palavraAcentuada,
+          casingBits1,
+          casingBits2,
+        ) => {
+          // Cadastro inicial deduplicado (case-insensitive), para que a
+          // contagem de valores seja previsível.
+          const cadastroInicialUnico: string[] = [];
+          for (const valor of outrosValoresCadastrados) {
+            if (!cadastroInicialUnico.some((v) => v.toLowerCase() === valor.toLowerCase())) {
+              cadastroInicialUnico.push(valor);
+            }
+          }
+
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoId]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+          const motivoNaoCumprimentoRepository = new InMemoryMotivoRepository(cadastroInicialUnico);
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+            undefined,
+            motivoNaoCumprimentoRepository,
+          );
+
+          /** Builds a fresh Task_Com_Acordo (Acordo_Atual pendente) ready to be evaluated as não cumprido. */
+          async function criarTaskComAcordoPendente(): Promise<Task> {
+            const task = await criarTaskNova(taskRepository, titulo);
+            const acordo = await service.registrarAcordo(task.id, tipoAcordoId);
+            expect(acordo.estadoCumprimento).toBe('pendente');
+            return task;
+          }
+
+          const cadastroAntes = await motivoNaoCumprimentoRepository.list();
+          const quantidadeAntes = cadastroAntes.length;
+          const textosAntes = new Set(cadastroAntes.map((m) => m.nome));
+
+          if (branch === 'vazio') {
+            const task = await criarTaskComAcordoPendente();
+
+            const acordoAvaliado = await service.avaliarAcordoAtual(task.id, 'nao_cumprido', {
+              motivoNome: nomeVazio,
+            });
+
+            // nenhum motivo associado (Requirement 3.6)
+            expect(acordoAvaliado.motivoNaoCumprimentoId).toBeFalsy();
+
+            const acordoPersistido = await acordoRepository.findById(acordoAvaliado.id);
+            expect(acordoPersistido!.motivoNaoCumprimentoId).toBeFalsy();
+
+            // cadastro inalterado: mesma quantidade e mesmos textos
+            const cadastroDepois = await motivoNaoCumprimentoRepository.list();
+            expect(cadastroDepois).toHaveLength(quantidadeAntes);
+            expect(new Set(cadastroDepois.map((m) => m.nome))).toEqual(textosAntes);
+          } else if (branch === 'novo') {
+            // nome novo: nunca coincide com nenhum valor já cadastrado
+            fc.pre(!cadastroInicialUnico.some((v) => v.toLowerCase() === nomeNovo.trim().toLowerCase()));
+            const nomeCompleto = `${espacosAntes}${nomeNovo}${espacosDepois}`;
+
+            const task = await criarTaskComAcordoPendente();
+
+            const acordoAvaliado = await service.avaliarAcordoAtual(task.id, 'nao_cumprido', {
+              motivoNome: nomeCompleto,
+            });
+
+            // exatamente 1 novo valor criado, com o texto pós-trim (Requirement 3.4)
+            const cadastroDepois = await motivoNaoCumprimentoRepository.list();
+            expect(cadastroDepois).toHaveLength(quantidadeAntes + 1);
+
+            const novoValor = cadastroDepois.find((m) => !textosAntes.has(m.nome));
+            expect(novoValor).toBeDefined();
+            expect(novoValor!.nome).toBe(nomeNovo.trim());
+
+            // o id recém-criado é associado ao Acordo_Atual
+            expect(acordoAvaliado.motivoNaoCumprimentoId).toBe(novoValor!.id);
+            const acordoPersistido = await acordoRepository.findById(acordoAvaliado.id);
+            expect(acordoPersistido!.motivoNaoCumprimentoId).toBe(novoValor!.id);
+          } else if (branch === 'existente') {
+            // garante que a palavra acentuada já está cadastrada — adicionada
+            // canonicamente ao cadastro inicial quando ainda não presente
+            // (case-insensitively), ou reaproveitada quando já estiver.
+            const jaCadastradoCanonico = cadastroInicialUnico.find(
+              (v) => v.toLowerCase() === palavraAcentuada.toLowerCase(),
+            );
+            const cadastroInicialComExistente = jaCadastradoCanonico
+              ? cadastroInicialUnico
+              : [...cadastroInicialUnico, palavraAcentuada];
+            const motivoRepositoryComExistente = new InMemoryMotivoRepository(cadastroInicialComExistente);
+            const motivoExistente = await motivoRepositoryComExistente.findByNomeCaseInsensitive(
+              palavraAcentuada,
+            );
+            expect(motivoExistente).not.toBeNull();
+
+            const svcComExistente = construirAcordoServicoDeTeste(
+              taskRepository as unknown as TaskRepository,
+              acordoRepository as unknown as AcordoRepository,
+              tipoAcordoRepository,
+              usuarioCadastradoRepository,
+              undefined,
+              motivoRepositoryComExistente,
+            );
+
+            const task = await criarTaskNova(taskRepository, titulo);
+            await svcComExistente.registrarAcordo(task.id, tipoAcordoId);
+
+            const quantidadeAntesExistente = (await motivoRepositoryComExistente.list()).length;
+            const textosAntesExistente = new Set(
+              (await motivoRepositoryComExistente.list()).map((m) => m.nome),
+            );
+
+            // variante com caixa mista sobre o texto canônico já cadastrado
+            // (mesmos caracteres, inclusive acentuados), com espaços à volta
+            // (Requirement 3.5)
+            const nomeComCasingMisto = aplicarCasing(motivoExistente!.nome, casingBits1);
+            const nomeComEspacos = `${espacosAntes}${nomeComCasingMisto}${espacosDepois}`;
+
+            const acordoAvaliado = await svcComExistente.avaliarAcordoAtual(task.id, 'nao_cumprido', {
+              motivoNome: nomeComEspacos,
+            });
+
+            // usa o id já cadastrado; nenhum novo valor é criado
+            expect(acordoAvaliado.motivoNaoCumprimentoId).toBe(motivoExistente!.id);
+
+            const cadastroDepois = await motivoRepositoryComExistente.list();
+            expect(cadastroDepois).toHaveLength(quantidadeAntesExistente);
+            expect(new Set(cadastroDepois.map((m) => m.nome))).toEqual(textosAntesExistente);
+          } else {
+            // idempotência: a mesma resolução (nome novo) confirmada para duas
+            // Tasks distintas com o mesmo cadastro inicial nunca cria um
+            // segundo valor duplicado — a segunda confirmação reutiliza o id
+            // criado pela primeira (Requirement 10.7).
+            fc.pre(!cadastroInicialUnico.some((v) => v.toLowerCase() === nomeNovo.trim().toLowerCase()));
+            const nomeCompleto = `${espacosAntes}${nomeNovo}${espacosDepois}`;
+
+            const primeiraTask = await criarTaskComAcordoPendente();
+            const primeiraAvaliacao = await service.avaliarAcordoAtual(primeiraTask.id, 'nao_cumprido', {
+              motivoNome: nomeCompleto,
+            });
+
+            const cadastroAposPrimeira = await motivoNaoCumprimentoRepository.list();
+            expect(cadastroAposPrimeira).toHaveLength(quantidadeAntes + 1);
+
+            // segunda confirmação: nova Task, mesmo nome com caixa/espaços
+            // possivelmente diferentes, mas equivalente sem diferenciar
+            // maiúsculas de minúsculas
+            const nomeComCasingDiferente = aplicarCasing(nomeNovo.trim(), casingBits2);
+            const nomeSegundaConfirmacao = `${espacosDepois}${nomeComCasingDiferente}${espacosAntes}`;
+
+            const segundaTask = await criarTaskComAcordoPendente();
+            const segundaAvaliacao = await service.avaliarAcordoAtual(segundaTask.id, 'nao_cumprido', {
+              motivoNome: nomeSegundaConfirmacao,
+            });
+
+            // nenhum valor novo é criado na segunda confirmação: mesma
+            // quantidade de valores no cadastro, e o mesmo id é reutilizado
+            const cadastroAposSegunda = await motivoNaoCumprimentoRepository.list();
+            expect(cadastroAposSegunda).toHaveLength(quantidadeAntes + 1);
+            expect(segundaAvaliacao.motivoNaoCumprimentoId).toBe(primeiraAvaliacao.motivoNaoCumprimentoId);
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  // Property 7: Nome de motivo acima do limite é rejeitado sem efeito
+  // Validates: Requirements 3.8
+  //
+  // Exercises `avaliarAcordoAtual(taskId, 'nao_cumprido', { motivoNome })`
+  // — the same entrypoint used by Property 6 — with names whose trim()
+  // exceeds the 100-character limit (Requirement 3.8's counterpart to
+  // Property 6's 1-100 character 'novo' branch). `resolverMotivo` checks
+  // the length **before** doing any cadastro lookup/creation and before
+  // `avaliarAcordoAtual` performs any write, so the rejection must leave
+  // everything untouched: the Cadastro_de_Motivos_de_Nao_Cumprimento (no
+  // inline creation attempted), the Acordo_Atual's `estadoCumprimento`
+  // (still `pendente`, not `nao_cumprido`), and the Task's `numTentativas`
+  // (not incremented, since the increment happens only after
+  // `resolverMotivo` succeeds).
+  //
+  // The generator covers lengths from 101 to ~150 characters (varying how
+  // far past the boundary the name goes) and optionally adds surrounding
+  // whitespace that is trimmed away but still leaves the trimmed text
+  // above 100 characters, mirroring how Property 6 builds names around
+  // the 1/100 boundaries.
+  it('Feature: melhorias-acordos, Property 7: Nome de motivo acima do limite é rejeitado sem efeito', async () => {
+    /** A non-whitespace character, safe for building names whose length survives trim(). */
+    const charNaoEspacoArb = fc.char().filter((c) => c.trim().length > 0);
+
+    /** A name whose trim() has between 101 and 150 characters (strictly above the limit). */
+    const nomeAcimaDoLimiteArb = fc
+      .array(charNaoEspacoArb, { minLength: 101, maxLength: 150 })
+      .map((chars) => chars.join(''));
+
+    /** Optional leading/trailing whitespace, trimmed away but not affecting the >100 trimmed length. */
+    const espacosOpcionaisArb = fc.stringOf(fc.constantFrom(' ', '\t', '\n'), { maxLength: 5 });
+
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 30 }),
+        fc.uuid(),
+        // cadastro inicial: 0 a 4 valores distintos já cadastrados.
+        fc
+          .array(
+            fc.array(charNaoEspacoArb, { minLength: 1, maxLength: 20 }).map((chars) => chars.join('')),
+            { minLength: 0, maxLength: 4 },
+          )
+          .map((valores) => {
+            const unicos: string[] = [];
+            for (const valor of valores) {
+              if (!unicos.some((v) => v.toLowerCase() === valor.toLowerCase())) {
+                unicos.push(valor);
+              }
+            }
+            return unicos;
+          }),
+        nomeAcimaDoLimiteArb,
+        espacosOpcionaisArb,
+        espacosOpcionaisArb,
+        async (titulo, tipoAcordoId, cadastroInicial, nomeAcimaDoLimite, espacosAntes, espacosDepois) => {
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          const tipoAcordoRepository = new InMemoryCadastroLookup([tipoAcordoId]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+          const motivoNaoCumprimentoRepository = new InMemoryMotivoRepository(cadastroInicial);
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+            undefined,
+            motivoNaoCumprimentoRepository,
+          );
+
+          const task = await criarTaskNova(taskRepository, titulo);
+          const acordoRegistrado = await service.registrarAcordo(task.id, tipoAcordoId);
+          expect(acordoRegistrado.estadoCumprimento).toBe('pendente');
+
+          const cadastroAntes = await motivoNaoCumprimentoRepository.list();
+          const quantidadeAntes = cadastroAntes.length;
+          const textosAntes = new Set(cadastroAntes.map((m) => m.nome));
+          const taskAntes = await taskRepository.findById(task.id);
+          const numTentativasAntes = taskAntes!.numTentativas;
+
+          const nomeCompleto = `${espacosAntes}${nomeAcimaDoLimite}${espacosDepois}`;
+
+          let erroCapturado: unknown;
+          try {
+            await service.avaliarAcordoAtual(task.id, 'nao_cumprido', { motivoNome: nomeCompleto });
+          } catch (erro) {
+            erroCapturado = erro;
+          }
+
+          expect(erroCapturado).toBeInstanceOf(ValidationError);
+          expect((erroCapturado as ValidationError).codigo).toBe('VALOR_EXCEDE_LIMITE');
+
+          // o Acordo_Atual permanece pendente (a avaliação foi rejeitada)
+          const acordoDepois = await acordoRepository.findById(acordoRegistrado.id);
+          expect(acordoDepois!.estadoCumprimento).toBe('pendente');
+          expect(acordoDepois!.motivoNaoCumprimentoId).toBeFalsy();
+
+          // Nº_Tentativas da Task permanece inalterado (o incremento só
+          // acontece após a avaliação ser aceita)
+          const taskDepois = await taskRepository.findById(task.id);
+          expect(taskDepois!.numTentativas).toBe(numTentativasAntes);
+
+          // o Cadastro_de_Motivos_de_Nao_Cumprimento permanece inalterado
+          // em quantidade e em conteúdo: nenhuma criação inline é tentada
+          const cadastroDepois = await motivoNaoCumprimentoRepository.list();
+          expect(cadastroDepois).toHaveLength(quantidadeAntes);
+          expect(new Set(cadastroDepois.map((m) => m.nome))).toEqual(textosAntes);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  // Property 9: Não cumprimento é bloqueado para "Avaliar e planejar"
+  // Validates: Requirements 5.2, 5.5
+  //
+  // Exercises `avaliarAcordoAtual(taskId, 'nao_cumprido', motivo)` against a
+  // Task whose Acordo_Atual's Tipo_de_Acordo `nome` is exactly "Avaliar e
+  // planejar" (task 3.1's block). `motivo` varies across every shape the
+  // Combobox_de_Motivo can produce — including a `motivoNome` genuinely
+  // intended for inline creation — to prove the block is checked **before**
+  // `resolverMotivo` runs (Requirement 5.5): no motivo is ever created
+  // inline for a rejected operation, regardless of what was informed.
+  // - 'ausente'/'nulo': no motivo informed at all.
+  // - 'idValido': a `motivoId` that already belongs to the
+  //   Cadastro_de_Motivos_de_Nao_Cumprimento.
+  // - 'idInvalido': a `motivoId` that does not belong to the cadastro (the
+  //   block must take precedence over the "motivo inválido" validation).
+  // - 'nomeNovo': a `motivoNome`, 1-100 characters, that does not match
+  //   (case-insensitively) any value already cadastrado — the exact shape
+  //   that would otherwise trigger inline creation (Requirement 3.4).
+  // - 'idStringCompat': a plain string (treated as a `motivoId` for
+  //   compatibility with existing callers, see `avaliarAcordoAtual`).
+  //
+  // Takes a full snapshot of the Task (`findById`), the Acordo history
+  // (`findHistoryByTaskId`) and the Cadastro_de_Motivos_de_Nao_Cumprimento
+  // (`list()`) before and after the rejected call and asserts they are
+  // deep-equal, proving zero side effects — including that no inline
+  // motivo was created even when a new name was supplied.
+  it('Feature: melhorias-acordos, Property 9: Não cumprimento é bloqueado para "Avaliar e planejar"', async () => {
+    /** A non-whitespace character, safe for building names whose length survives trim(). */
+    const charNaoEspacoArb = fc.char().filter((c) => c.trim().length > 0);
+
+    /** A motivoNome, 1-100 characters after trim, intended for inline creation. */
+    const nomeNovoArb = fc.array(charNaoEspacoArb, { minLength: 1, maxLength: 100 }).map((chars) => chars.join(''));
+
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.uuid(),
+        fc.uuid(),
+        fc.constantFrom<'ausente' | 'nulo' | 'idValido' | 'idInvalido' | 'nomeNovo' | 'idStringCompat'>(
+          'ausente',
+          'nulo',
+          'idValido',
+          'idInvalido',
+          'nomeNovo',
+          'idStringCompat',
+        ),
+        nomeNovoArb,
+        async (titulo, tipoAcordoId, motivoIdInvalido, branch, nomeNovo) => {
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          // Acordo_Atual da Task é exatamente "Avaliar e planejar" (task 3.1's block).
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+            { id: tipoAcordoId, nome: 'Avaliar e planejar' },
+          ]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+          // Cadastro com exatamente 1 valor pré-existente, usado pelo branch
+          // 'idValido' e como referência de não-colisão para 'nomeNovo'.
+          const motivoNaoCumprimentoRepository = new InMemoryMotivoRepository(['Motivo já cadastrado']);
+          const motivoExistente = (await motivoNaoCumprimentoRepository.list())[0]!;
+
+          // 'nomeNovo' deve realmente ser novo: nunca coincidir, sem diferenciar
+          // maiúsculas de minúsculas, com o valor já cadastrado.
+          fc.pre(nomeNovo.trim().toLowerCase() !== motivoExistente.nome.toLowerCase());
+          // motivoIdInvalido nunca deve coincidir com o id já cadastrado.
+          fc.pre(motivoIdInvalido !== motivoExistente.id);
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+            undefined,
+            motivoNaoCumprimentoRepository,
+          );
+
+          // Task_Com_Acordo com Acordo_Atual pendente, de Tipo_de_Acordo
+          // "Avaliar e planejar".
+          const taskNova = await criarTaskNova(taskRepository, titulo);
+          const acordoAtual = await service.registrarAcordo(taskNova.id, tipoAcordoId);
+          expect(acordoAtual.estadoCumprimento).toBe('pendente');
+
+          let motivo: string | { motivoId?: string | null; motivoNome?: string | null } | null | undefined;
+          switch (branch) {
+            case 'ausente':
+              motivo = undefined;
+              break;
+            case 'nulo':
+              motivo = null;
+              break;
+            case 'idValido':
+              motivo = { motivoId: motivoExistente.id };
+              break;
+            case 'idInvalido':
+              motivo = { motivoId: motivoIdInvalido };
+              break;
+            case 'nomeNovo':
+              motivo = { motivoNome: nomeNovo };
+              break;
+            case 'idStringCompat':
+              motivo = motivoExistente.id;
+              break;
+          }
+
+          // Snapshot completo antes da chamada rejeitada.
+          const taskAntes = await taskRepository.findById(taskNova.id);
+          const historicoAntes = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          const cadastroAntes = await motivoNaoCumprimentoRepository.list();
+
+          let erroCapturado: unknown;
+          try {
+            await service.avaliarAcordoAtual(taskNova.id, 'nao_cumprido', motivo);
+          } catch (erro) {
+            erroCapturado = erro;
+          }
+
+          expect(erroCapturado).toBeInstanceOf(ConflictError);
+          expect((erroCapturado as ConflictError).codigo).toBe(
+            'ACORDO_AVALIAR_PLANEJAR_NAO_CUMPRIMENTO_BLOQUEADO',
+          );
+
+          // Snapshot completo depois: Task, histórico de Acordos e cadastro de
+          // motivos permanecem exatamente iguais — inclusive quando o motivo
+          // informado era um nome novo destinado a criação inline.
+          const taskDepois = await taskRepository.findById(taskNova.id);
+          const historicoDepois = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          const cadastroDepois = await motivoNaoCumprimentoRepository.list();
+
+          expect(taskDepois).toEqual(taskAntes);
+          expect(historicoDepois).toEqual(historicoAntes);
+          expect(cadastroDepois).toEqual(cadastroAntes);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+describe('AcordoService.marcarNaoCumprido', () => {
+  // Property 10: Operações que exigem Acordo_Atual pendente são rejeitadas sem efeito
+  // Validates: Requirements 3.11, 4.9
+  //
+  // `marcarNaoCumprido` (task 3.2) is the only operation that requires the
+  // Task's Acordo_Atual to be specifically `pendente` — rejecting when
+  // there is no Acordo_Atual at all (`ConflictError SEM_ACORDO_ATUAL`,
+  // Task_Nova) *and* when there is one but it has already been evaluated
+  // (`ConflictError ACORDO_ATUAL_JA_AVALIADO`, Requirement 3.11),
+  // regardless of the evaluated outcome (cumprido or não cumprido).
+  //
+  // The generator covers every possible starting state for a Task
+  // regarding this specific requirement:
+  // - 'semAcordo': a Task_Nova, with no Acordo_Atual at all.
+  // - 'pendente': a Task_Com_Acordo whose Acordo_Atual is `pendente` — the
+  //   contrasting positive case, asserted within the same property to
+  //   prove the rejection is specific to a non-`pendente` state, not to
+  //   `marcarNaoCumprido` itself.
+  // - 'cumprido' / 'nao_cumprido': a Task_Com_Acordo whose Acordo_Atual has
+  //   already been evaluated with that exact outcome.
+  //
+  // Uses a Tipo_de_Acordo whose `nome` is NOT "Avaliar e planejar", so this
+  // property isolates the `pendente`-requirement rejection from task 3.1/
+  // 3.3's separate "Avaliar e planejar" block (Property 9).
+  //
+  // For every rejection branch ('semAcordo', 'cumprido', 'nao_cumprido'),
+  // takes a full snapshot of the Task (`findById`) and the Acordo history
+  // (`findHistoryByTaskId`) before and after the rejected call and asserts
+  // they are deep-equal, proving zero side effects — nothing is registered
+  // or altered.
+  it('Feature: melhorias-acordos, Property 10: Operações que exigem Acordo_Atual pendente são rejeitadas sem efeito', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.uuid(),
+        fc.constantFrom<'semAcordo' | 'pendente' | 'cumprido' | 'nao_cumprido'>(
+          'semAcordo',
+          'pendente',
+          'cumprido',
+          'nao_cumprido',
+        ),
+        async (titulo, tipoAcordoId, branch) => {
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          // Tipo_de_Acordo diferente de "Avaliar e planejar", para isolar
+          // essa propriedade do bloqueio coberto pela Property 9.
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([{ id: tipoAcordoId, nome: 'Outro tipo' }]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+          );
+
+          const taskNova = await criarTaskNova(taskRepository, titulo);
+
+          if (branch === 'semAcordo') {
+            expect(taskNova.acordoAtualId).toBeFalsy();
+
+            const taskAntes = await taskRepository.findById(taskNova.id);
+            const historicoAntes = await acordoRepository.findHistoryByTaskId(taskNova.id);
+
+            let erroCapturado: unknown;
+            try {
+              await service.marcarNaoCumprido(taskNova.id);
+            } catch (erro) {
+              erroCapturado = erro;
+            }
+
+            expect(erroCapturado).toBeInstanceOf(ConflictError);
+            expect((erroCapturado as ConflictError).codigo).toBe('SEM_ACORDO_ATUAL');
+
+            const taskDepois = await taskRepository.findById(taskNova.id);
+            const historicoDepois = await acordoRepository.findHistoryByTaskId(taskNova.id);
+            expect(taskDepois).toEqual(taskAntes);
+            expect(historicoDepois).toEqual(historicoAntes);
+            return;
+          }
+
+          // Task_Com_Acordo: registra o primeiro Acordo (fica `pendente`) e,
+          // fora dos branches 'pendente', avalia-o com o desfecho do branch.
+          const acordoAtual = await service.registrarAcordo(taskNova.id, tipoAcordoId);
+          expect(acordoAtual.estadoCumprimento).toBe('pendente');
+
+          if (branch !== 'pendente') {
+            await acordoRepository.update(acordoAtual.id, { estadoCumprimento: branch });
+          }
+
+          if (branch === 'pendente') {
+            // Caso contrastante positivo: com o Acordo_Atual `pendente`, a
+            // operação é aceita normalmente.
+            const numTentativasAntes = (await taskRepository.findById(taskNova.id))!.numTentativas;
+
+            const acordoAvaliado = await service.marcarNaoCumprido(taskNova.id);
+
+            expect(acordoAvaliado.id).toBe(acordoAtual.id);
+            expect(acordoAvaliado.estadoCumprimento).toBe('nao_cumprido');
+
+            const taskDepois = await taskRepository.findById(taskNova.id);
+            expect(taskDepois!.acordoAtualId).toBe(acordoAtual.id);
+            expect(taskDepois!.numTentativas).toBe(numTentativasAntes + 1);
+            return;
+          }
+
+          // 'cumprido' / 'nao_cumprido': o Acordo_Atual já foi avaliado —
+          // marcarNaoCumprido deve rejeitar sem qualquer efeito.
+          const taskAntes = await taskRepository.findById(taskNova.id);
+          const historicoAntes = await acordoRepository.findHistoryByTaskId(taskNova.id);
+
+          let erroCapturado: unknown;
+          try {
+            await service.marcarNaoCumprido(taskNova.id);
+          } catch (erro) {
+            erroCapturado = erro;
+          }
+
+          expect(erroCapturado).toBeInstanceOf(ConflictError);
+          expect((erroCapturado as ConflictError).codigo).toBe('ACORDO_ATUAL_JA_AVALIADO');
+
+          const taskDepois = await taskRepository.findById(taskNova.id);
+          const historicoDepois = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          expect(taskDepois).toEqual(taskAntes);
+          expect(historicoDepois).toEqual(historicoAntes);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+// Property 8: Contadores são monotônicos e mutuamente exclusivos
+// Validates: Requirements 1.3, 4.6, 5.3
+//
+// `numTentativas` e `tentativasAvaliarPlanejar` são dois contadores
+// independentes da Task, cada um avançado por uma etapa distinta de uma
+// mesma sequência "avaliar Acordo_Atual -> registrar próximo Acordo":
+// - a etapa de avaliação (`avaliarAcordoAtual`) incrementa `numTentativas`
+//   em exatamente 1 quando o resultado é `nao_cumprido` (Requirement
+//   4.6/5.3) e nunca toca `tentativasAvaliarPlanejar`;
+// - a etapa de registro (`registrarAcordo`) subsequente incrementa
+//   `tentativasAvaliarPlanejar` em exatamente 1 quando o Acordo_Atual
+//   substituído era "Avaliar e planejar" avaliado como cumprido e o novo
+//   Acordo também é "Avaliar e planejar" (reiniciando a 0 quando essa
+//   cadeia se rompe — ver o describe "cadeia de Avaliar e planejar
+//   consecutivos" acima) e nunca toca `numTentativas`.
+//
+// Este teste generaliza esse comportamento como duas propriedades sobre
+// uma sequência arbitrária de ciclos: (1) monotonicidade — nenhum dos dois
+// contadores decresce a cada etapa, exceto o reinício documentado de
+// `tentativasAvaliarPlanejar` quando a cadeia se rompe — e (2)
+// exclusividade mútua — cada etapa (avaliação ou registro) afeta no
+// máximo um dos dois contadores, nunca ambos. `numTentativas` é semeado
+// tanto em 0 quanto em 9999 diretamente via `taskRepository.update`,
+// verificando que o contador continua incrementando corretamente nos dois
+// extremos documentados (Requirement 1.2), sem qualquer overflow/
+// wraparound.
+describe('AcordoService — contadores (Property 8)', () => {
+  const NOME_AVALIAR_E_PLANEJAR = 'Avaliar e planejar';
+
+  it('Feature: melhorias-acordos, Property 8: Contadores são monotônicos e mutuamente exclusivos', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom<'avaliarPlanejar' | 'outro'>('avaliarPlanejar', 'outro'),
+        fc.constantFrom(0, 9999),
+        fc.array(
+          fc.record({
+            resultadoSeOutro: fc.constantFrom<'cumprido' | 'nao_cumprido'>('cumprido', 'nao_cumprido'),
+            proximoTipo: fc.constantFrom<'avaliarPlanejar' | 'outro'>('avaliarPlanejar', 'outro'),
+          }),
+          { minLength: 1, maxLength: 15 },
+        ),
+        async (tipoInicial, numTentativasInicial, ciclos) => {
+          const idAvaliarPlanejar = randomUUID();
+          const idOutroTipo = randomUUID();
+          const idPorTag = { avaliarPlanejar: idAvaliarPlanejar, outro: idOutroTipo } as const;
+
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+            { id: idAvaliarPlanejar, nome: NOME_AVALIAR_E_PLANEJAR },
+            { id: idOutroTipo, nome: 'Enviar para review' },
+          ]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+          );
+
+          const taskNova = await criarTaskNova(taskRepository, 'Task de teste de contadores');
+
+          // Semeia numTentativas no extremo escolhido (0 ou 9999) diretamente
+          // pelo repositório fake, contornando o serviço — exercita os dois
+          // extremos documentados sem depender de 9999 avaliações reais.
+          await taskRepository.update(taskNova.id, { numTentativas: numTentativasInicial });
+
+          // primeiro Acordo, sem Acordo_Atual anterior — não afeta nenhum dos
+          // dois contadores (Task_Nova).
+          await service.registrarAcordo(taskNova.id, idPorTag[tipoInicial]);
+
+          let numTentativasEsperado = numTentativasInicial;
+          let tentativasAvaliarPlanejarEsperado = 0;
+          let tipoAtual: 'avaliarPlanejar' | 'outro' = tipoInicial;
+
+          const taskAposPrimeiroRegistro = await taskRepository.findById(taskNova.id);
+          expect(taskAposPrimeiroRegistro!.numTentativas).toBe(numTentativasEsperado);
+          expect(taskAposPrimeiroRegistro!.tentativasAvaliarPlanejar).toBe(tentativasAvaliarPlanejarEsperado);
+
+          for (const ciclo of ciclos) {
+            // "Avaliar e planejar" só pode ser avaliado como cumprido — o
+            // não cumprimento é bloqueado (Property 9); qualquer outro tipo
+            // aceita ambos os resultados.
+            const resultado: 'cumprido' | 'nao_cumprido' =
+              tipoAtual === 'avaliarPlanejar' ? 'cumprido' : ciclo.resultadoSeOutro;
+
+            // --- Etapa de avaliação (avaliarAcordoAtual) ---
+            const numTentativasAntesEval = numTentativasEsperado;
+            const tentativasAvaliarPlanejarAntesEval = tentativasAvaliarPlanejarEsperado;
+
+            await service.avaliarAcordoAtual(taskNova.id, resultado);
+
+            if (resultado === 'nao_cumprido') {
+              numTentativasEsperado += 1;
+            }
+            // tentativasAvaliarPlanejar nunca é tocado pela avaliação em si.
+
+            const taskAposEval = await taskRepository.findById(taskNova.id);
+            expect(taskAposEval!.numTentativas).toBe(numTentativasEsperado);
+            expect(taskAposEval!.tentativasAvaliarPlanejar).toBe(tentativasAvaliarPlanejarAntesEval);
+
+            // monotonicidade: nenhum dos dois contadores decresce nesta etapa
+            expect(numTentativasEsperado).toBeGreaterThanOrEqual(numTentativasAntesEval);
+            expect(taskAposEval!.tentativasAvaliarPlanejar).toBeGreaterThanOrEqual(
+              tentativasAvaliarPlanejarAntesEval,
+            );
+
+            // exclusividade mútua: esta etapa nunca toca tentativasAvaliarPlanejar,
+            // e nunca altera os dois contadores simultaneamente
+            const numTentativasMudouEval = numTentativasEsperado !== numTentativasAntesEval;
+            const tentativasAvaliarPlanejarMudouEval =
+              taskAposEval!.tentativasAvaliarPlanejar !== tentativasAvaliarPlanejarAntesEval;
+            expect(tentativasAvaliarPlanejarMudouEval).toBe(false);
+            expect(numTentativasMudouEval && tentativasAvaliarPlanejarMudouEval).toBe(false);
+
+            // --- Etapa de registro (registrarAcordo) ---
+            const numTentativasAntesRegistro = numTentativasEsperado;
+            const tentativasAvaliarPlanejarAntesRegistro = tentativasAvaliarPlanejarEsperado;
+
+            await service.registrarAcordo(taskNova.id, idPorTag[ciclo.proximoTipo]);
+
+            const incrementaCadeia =
+              tipoAtual === 'avaliarPlanejar' && resultado === 'cumprido' && ciclo.proximoTipo === 'avaliarPlanejar';
+            tentativasAvaliarPlanejarEsperado = incrementaCadeia ? tentativasAvaliarPlanejarEsperado + 1 : 0;
+
+            const taskAposRegistro = await taskRepository.findById(taskNova.id);
+            expect(taskAposRegistro!.numTentativas).toBe(numTentativasEsperado);
+            expect(taskAposRegistro!.tentativasAvaliarPlanejar).toBe(tentativasAvaliarPlanejarEsperado);
+
+            // monotonicidade: numTentativas nunca decresce; tentativasAvaliarPlanejar
+            // só pode decrescer (reinício a 0) exatamente quando a cadeia se rompe
+            expect(numTentativasEsperado).toBeGreaterThanOrEqual(numTentativasAntesRegistro);
+            if (incrementaCadeia) {
+              expect(tentativasAvaliarPlanejarEsperado).toBeGreaterThan(tentativasAvaliarPlanejarAntesRegistro);
+            }
+
+            // exclusividade mútua: esta etapa nunca toca numTentativas
+            const numTentativasMudouRegistro = taskAposRegistro!.numTentativas !== numTentativasAntesRegistro;
+            const tentativasAvaliarPlanejarMudouRegistro =
+              tentativasAvaliarPlanejarEsperado !== tentativasAvaliarPlanejarAntesRegistro;
+            expect(numTentativasMudouRegistro).toBe(false);
+            expect(numTentativasMudouRegistro && tentativasAvaliarPlanejarMudouRegistro).toBe(false);
+
+            tipoAtual = ciclo.proximoTipo;
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
 });
 
 // Unit tests for AcordoService.finalizarTask ("Finalizar" — ação manual):
@@ -1467,7 +2444,7 @@ describe('AcordoService.finalizarTask', () => {
     ]);
     const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1509,7 +2486,7 @@ describe('AcordoService.finalizarTask', () => {
   it('rejeita uma Task que não existe com NotFoundError', async () => {
     const taskRepository = new InMemoryTaskRepository();
     const acordoRepository = new InMemoryAcordoRepository();
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       new InMemoryCadastroLookup(),
@@ -1522,7 +2499,7 @@ describe('AcordoService.finalizarTask', () => {
   it('rejeita uma Task_Nova (sem Acordo_Atual) com ConflictError, preservando concluida = false', async () => {
     const taskRepository = new InMemoryTaskRepository();
     const acordoRepository = new InMemoryAcordoRepository();
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       new InMemoryCadastroLookup(),
@@ -1556,7 +2533,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
     ]);
     const usuarioCadastradoRepository = new InMemoryCadastroLookup([responsavelId]);
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1595,7 +2572,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
     ]);
     const usuarioCadastradoRepository = new InMemoryCadastroLookup([responsavelId]);
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1635,7 +2612,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
     ]);
     const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1657,7 +2634,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
     const tipoAcordoRepository = new InMemoryCadastroLookup();
     const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1673,7 +2650,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
     const tipoAcordoRepository = new InMemoryCadastroLookup();
     const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1694,7 +2671,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
     ]);
     const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1722,7 +2699,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
     ]);
     const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-    const service = new AcordoService(
+    const service = construirAcordoServicoDeTeste(
       taskRepository as unknown as TaskRepository,
       acordoRepository as unknown as AcordoRepository,
       tipoAcordoRepository,
@@ -1761,7 +2738,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1792,7 +2769,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1817,7 +2794,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1848,7 +2825,7 @@ describe('AcordoService.repetirUltimoAcordo', () => {
       ]);
       const usuarioCadastradoRepository = new InMemoryCadastroLookup();
 
-      const service = new AcordoService(
+      const service = construirAcordoServicoDeTeste(
         taskRepository as unknown as TaskRepository,
         acordoRepository as unknown as AcordoRepository,
         tipoAcordoRepository,
@@ -1871,5 +2848,1081 @@ describe('AcordoService.repetirUltimoAcordo', () => {
       const taskDepois = await taskRepository.findById(taskNova.id);
       expect(taskDepois!.repeteAcordoNaoCumprido).toBe(false);
     });
+  });
+});
+
+// Property 11: Repetição do último Acordo é uma operação única e completa
+// Validates: Requirements 4.2, 4.3, 4.5
+//
+// `repetirUltimoAcordo` compõe `avaliarAcordoAtual` + `registrarAcordo`
+// dentro de um único `runTransaction` (task 3.6). Esta propriedade exercita
+// as duas ramificações de Tipo_de_Acordo do Acordo_Atual em uma única
+// chamada de `repetirUltimoAcordo` e verifica que o resultado é sempre
+// completo e consistente — nunca parcial:
+//
+// - 'outro' (Tipo_de_Acordo diferente de "Avaliar e planejar",
+//   Requirement 4.2): o Acordo_Atual é avaliado como `nao_cumprido` (com o
+//   motivo resolvido quando informado), Nº_Tentativas incrementa em
+//   exatamente 1, e um novo Acordo do mesmo Tipo_de_Acordo é registrado
+//   como o novo Acordo_Atual, mantendo o Responsável.
+// - 'avaliarPlanejar' (Tipo_de_Acordo "Avaliar e planejar", Requirements
+//   4.3 e 4.5): o Acordo_Atual é avaliado como `cumprido` (com o motivo
+//   resolvido quando informado — a mesma resolução de motivo se aplica
+//   independentemente do resultado, Requirement 4.5), Nº_Tentativas
+//   permanece inalterado, e um novo Acordo "Avaliar e planejar" é
+//   registrado como o novo Acordo_Atual, mantendo o Responsável. O
+//   Nº_Tentativas_Avaliar_Planejar inicial varia incluindo valores abaixo
+//   de 2 (onde o Requirement 4.3 dispensa o Modal_de_Motivo no frontend) e
+//   a partir de 2 (onde o Requirement 4.4 exige o Modal_de_Motivo no
+//   frontend) — o próprio `repetirUltimoAcordo` não decide sobre o Modal
+//   (decisão do frontend, Property 12): esta propriedade prova que o
+//   backend produz o mesmo resultado atômico e completo em ambos os
+//   casos, dado um motivo (ou a ausência dele) já resolvido pelo Usuário.
+//
+// A ramificação do motivo cobre as formas que o Combobox_de_Motivo pode
+// produzir (Requirements 3.3-3.5 reaproveitados por `resolverMotivo`):
+// - 'ausente': nenhum motivo informado.
+// - 'idExistente': um `motivoId` já cadastrado.
+// - 'nomeNovo': um `motivoNome` que não coincide com nenhum valor já
+//   cadastrado — dispara criação inline.
+// - 'nomeExistente': um `motivoNome` que coincide, sem diferenciar
+//   maiúsculas de minúsculas, com um valor já cadastrado — reaproveita o
+//   id existente sem duplicar o cadastro.
+//
+// "Operação única e completa": a chamada única a `repetirUltimoAcordo`
+// deve produzir, sempre em conjunto, exatamente 1 novo Acordo no
+// histórico (nunca 0 nem mais de 1), o Acordo anterior avaliado com o
+// resultado e o motivo esperados, os contadores (`numTentativas` e
+// `tentativasAvaliarPlanejar`) each atualizado exatamente como esperado, e
+// o Responsável preservado — nunca um subconjunto desses efeitos.
+describe('AcordoService.repetirUltimoAcordo — atomicidade e completude (Property 11)', () => {
+  const NOME_AVALIAR_E_PLANEJAR = 'Avaliar e planejar';
+
+  it('Feature: melhorias-acordos, Property 11: Repetição do último Acordo é uma operação única e completa', async () => {
+    /** A non-whitespace character, safe for building names whose length survives trim(). */
+    const charNaoEspacoArb = fc.char().filter((c) => c.trim().length > 0);
+
+    /** A new motivo name (1-100 characters after trim). */
+    const nomeNovoArb = fc.array(charNaoEspacoArb, { minLength: 1, maxLength: 100 }).map((chars) => chars.join(''));
+
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.uuid(),
+        fc.constantFrom<'avaliarPlanejar' | 'outro'>('avaliarPlanejar', 'outro'),
+        fc.constantFrom(0, 1, 2, 5),
+        fc.constantFrom<'ausente' | 'idExistente' | 'nomeNovo' | 'nomeExistente'>(
+          'ausente',
+          'idExistente',
+          'nomeNovo',
+          'nomeExistente',
+        ),
+        nomeNovoArb,
+        fc.boolean(),
+        fc.uuid(),
+        async (
+          titulo,
+          tipoAcordoId,
+          tipoBranch,
+          tentativasAvaliarPlanejarInicial,
+          motivoBranch,
+          nomeNovo,
+          comResponsavel,
+          responsavelId,
+        ) => {
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          const nomeTipoAcordo = tipoBranch === 'avaliarPlanejar' ? NOME_AVALIAR_E_PLANEJAR : 'Enviar para review';
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([{ id: tipoAcordoId, nome: nomeTipoAcordo }]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup(comResponsavel ? [responsavelId] : []);
+          // Cadastro com exatamente 1 valor pré-existente, usado pelos
+          // branches 'idExistente'/'nomeExistente' e como referência de
+          // não-colisão para 'nomeNovo'.
+          const motivoNaoCumprimentoRepository = new InMemoryMotivoRepository(['Motivo já cadastrado']);
+          const motivoExistente = (await motivoNaoCumprimentoRepository.list())[0]!;
+
+          // 'nomeNovo' deve realmente ser novo: nunca coincidir, sem
+          // diferenciar maiúsculas de minúsculas, com o valor já cadastrado.
+          fc.pre(nomeNovo.trim().toLowerCase() !== motivoExistente.nome.toLowerCase());
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+            undefined,
+            motivoNaoCumprimentoRepository,
+          );
+
+          // Task_Com_Acordo com Acordo_Atual pendente do Tipo_de_Acordo
+          // escolhido, com Responsável opcional.
+          const taskNova = await criarTaskNova(taskRepository, titulo);
+          const acordoAtual = await service.registrarAcordo(
+            taskNova.id,
+            tipoAcordoId,
+            comResponsavel ? responsavelId : undefined,
+          );
+          expect(acordoAtual.estadoCumprimento).toBe('pendente');
+
+          // Semeia Nº_Tentativas_Avaliar_Planejar diretamente pelo
+          // repositório fake, contornando o serviço — o valor inicial não
+          // deveria influenciar o comportamento do backend (a decisão do
+          // Modal_de_Motivo baseada nesse contador é do frontend, Property
+          // 12): repete-se, aqui, tanto abaixo quanto a partir de 2.
+          if (tipoBranch === 'avaliarPlanejar') {
+            await taskRepository.update(taskNova.id, {
+              tentativasAvaliarPlanejar: tentativasAvaliarPlanejarInicial,
+            });
+          }
+
+          let motivo: string | { motivoId?: string | null; motivoNome?: string | null } | null | undefined;
+          switch (motivoBranch) {
+            case 'ausente':
+              motivo = undefined;
+              break;
+            case 'idExistente':
+              motivo = { motivoId: motivoExistente.id };
+              break;
+            case 'nomeNovo':
+              motivo = { motivoNome: nomeNovo };
+              break;
+            case 'nomeExistente':
+              motivo = { motivoNome: motivoExistente.nome.toUpperCase() };
+              break;
+          }
+
+          const taskAntes = await taskRepository.findById(taskNova.id);
+          const historicoAntes = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          const cadastroAntes = await motivoNaoCumprimentoRepository.list();
+          expect(historicoAntes).toHaveLength(1);
+
+          // Operação única: uma só chamada a `repetirUltimoAcordo`.
+          const novoAcordo = await service.repetirUltimoAcordo(taskNova.id, motivo);
+
+          // --- Completude: todos os efeitos esperados ocorreram juntos ---
+
+          // (1) Exatamente 1 novo Acordo foi registrado — nunca 0, nunca 2+.
+          const historicoDepois = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          expect(historicoDepois).toHaveLength(historicoAntes.length + 1);
+          expect(novoAcordo.id).not.toBe(acordoAtual.id);
+
+          // (2) O novo Acordo é do mesmo Tipo_de_Acordo, `pendente`, e passou
+          // a ser o Acordo_Atual da Task.
+          expect(novoAcordo.tipoAcordoId).toBe(tipoAcordoId);
+          expect(novoAcordo.estadoCumprimento).toBe('pendente');
+          const taskDepois = await taskRepository.findById(taskNova.id);
+          expect(taskDepois!.acordoAtualId).toBe(novoAcordo.id);
+
+          // (3) O Acordo anterior foi avaliado com o resultado esperado.
+          const acordoAnteriorAtualizado = await acordoRepository.findById(acordoAtual.id);
+          const resultadoEsperado = tipoBranch === 'avaliarPlanejar' ? 'cumprido' : 'nao_cumprido';
+          expect(acordoAnteriorAtualizado!.estadoCumprimento).toBe(resultadoEsperado);
+
+          // (4) O motivo resolvido foi associado ao Acordo anterior,
+          // independentemente do resultado (Requirement 4.5) — a mesma
+          // resolução de `resolverMotivo` (Requirements 3.3-3.5) se aplica.
+          if (motivoBranch === 'ausente') {
+            expect(acordoAnteriorAtualizado!.motivoNaoCumprimentoId).toBeFalsy();
+            const cadastroDepois = await motivoNaoCumprimentoRepository.list();
+            expect(cadastroDepois).toHaveLength(cadastroAntes.length);
+          } else if (motivoBranch === 'idExistente' || motivoBranch === 'nomeExistente') {
+            expect(acordoAnteriorAtualizado!.motivoNaoCumprimentoId).toBe(motivoExistente.id);
+            const cadastroDepois = await motivoNaoCumprimentoRepository.list();
+            expect(cadastroDepois).toHaveLength(cadastroAntes.length);
+          } else {
+            const cadastroDepois = await motivoNaoCumprimentoRepository.list();
+            expect(cadastroDepois).toHaveLength(cadastroAntes.length + 1);
+            const novoValor = cadastroDepois.find((m) => m.id !== motivoExistente.id);
+            expect(novoValor).toBeDefined();
+            expect(novoValor!.nome).toBe(nomeNovo.trim());
+            expect(acordoAnteriorAtualizado!.motivoNaoCumprimentoId).toBe(novoValor!.id);
+          }
+
+          // (5) Os contadores refletem exatamente a ramificação exercitada,
+          // e nunca ambos ao mesmo tempo (Property 8 generaliza essa
+          // exclusividade mútua; aqui verifica-se o caso específico da
+          // repetição em uma única chamada).
+          if (tipoBranch === 'outro') {
+            expect(taskDepois!.numTentativas).toBe(taskAntes!.numTentativas + 1);
+            expect(taskDepois!.tentativasAvaliarPlanejar).toBe(taskAntes!.tentativasAvaliarPlanejar);
+          } else {
+            expect(taskDepois!.numTentativas).toBe(taskAntes!.numTentativas);
+            // a cadeia de "Avaliar e planejar" consecutivos incrementa em 1
+            // (Acordo_Atual anterior era "Avaliar e planejar" avaliado como
+            // cumprido, e o novo Acordo registrado também é "Avaliar e
+            // planejar" — ver `registrarAcordo`), independentemente do valor
+            // inicial do contador (0, 1, 2 ou 5).
+            expect(taskDepois!.tentativasAvaliarPlanejar).toBe(taskAntes!.tentativasAvaliarPlanejar + 1);
+          }
+
+          // (6) O Responsável atual da Task é preservado, com ou sem
+          // Responsável definido originalmente.
+          if (comResponsavel) {
+            expect(taskDepois!.responsavelId).toBe(responsavelId);
+          } else {
+            expect(taskDepois!.responsavelId).toBeFalsy();
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+// Property-based test for the Registro_de_Acordo_com_Avaliacao (task 3.8):
+// `registrarAcordo` with `confirmaCumprimentoAcordoAtual` embutindo a
+// avaliação do Acordo_Atual pendente no mesmo registro do novo Acordo.
+//
+// Exercises the four mutually exclusive branches that `registrarAcordo`
+// distinguishes when deciding whether to apply the
+// Registro_de_Acordo_com_Avaliacao, picking which branch to run per
+// property iteration via `fc.constantFrom`:
+// - 'pendenteConfirmado': o Acordo_Atual está `pendente` e Tipo_de_Acordo
+//   diferente de "Finalizar", e a confirmação é enviada -> avalia o
+//   Acordo_Atual como cumprido e registra o novo Acordo em uma única
+//   operação, mantendo o Nº_Tentativas inalterado (Requirement 8.2).
+// - 'pendenteFinalizar': o Acordo_Atual está `pendente` e seu
+//   Tipo_de_Acordo é exatamente "Finalizar", e a confirmação é enviada ->
+//   avalia o Acordo_Atual como cumprido, marca `Task.concluida = true` e
+//   NÃO registra nenhum novo Acordo (Requirement 8.7).
+// - 'taskNova': a Task não possui Acordo_Atual (Task_Nova) -> o registro
+//   do primeiro Acordo prossegue normalmente, e a presença/ausência da
+//   confirmação (randomizada) não tem efeito nenhum (Requirement 8.4).
+// - 'jaAvaliado': o Acordo_Atual já foi avaliado (cumprido ou não
+//   cumprido, randomizado) antes desta chamada -> o registro do próximo
+//   Acordo prossegue normalmente (caminho já existente antes desta
+//   tarefa), e a presença/ausência da confirmação (randomizada) não tem
+//   efeito nenhum (Requirement 8.4).
+describe('AcordoService.registrarAcordo — Registro_de_Acordo_com_Avaliacao (Property 14)', () => {
+  const NOME_FINALIZAR = 'Finalizar';
+  const NOME_OUTRO_TIPO = 'Enviar para review';
+
+  // Property 14: Registro de Acordo com avaliação embutida
+  // Validates: Requirements 8.2, 8.4, 8.7
+  it('Feature: melhorias-acordos, Property 14: Registro de Acordo com avaliação embutida', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.tuple(fc.uuid(), fc.uuid()).filter(([a, b]) => a !== b),
+        fc.constantFrom<'pendenteConfirmado' | 'pendenteFinalizar' | 'taskNova' | 'jaAvaliado'>(
+          'pendenteConfirmado',
+          'pendenteFinalizar',
+          'taskNova',
+          'jaAvaliado',
+        ),
+        fc.boolean(),
+        fc.constantFrom<'cumprido' | 'nao_cumprido'>('cumprido', 'nao_cumprido'),
+        async (titulo, [tipoAcordoIdVelho, tipoAcordoIdNovo], branch, confirmacaoEnviada, estadoAnterior) => {
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+
+          const nomeTipoVelho = branch === 'pendenteFinalizar' ? NOME_FINALIZAR : NOME_OUTRO_TIPO;
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+            { id: tipoAcordoIdVelho, nome: nomeTipoVelho },
+            { id: tipoAcordoIdNovo, nome: NOME_OUTRO_TIPO },
+          ]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+          );
+
+          const taskNova = await criarTaskNova(taskRepository, titulo);
+
+          if (branch === 'taskNova') {
+            // Task_Nova: sem Acordo_Atual. A confirmação (randomizada) é
+            // ignorada quando enviada (Requirement 8.4).
+            const options = confirmacaoEnviada ? { confirmaCumprimentoAcordoAtual: true } : undefined;
+            const novoAcordo = await service.registrarAcordo(taskNova.id, tipoAcordoIdNovo, undefined, options);
+
+            expect(novoAcordo.tipoAcordoId).toBe(tipoAcordoIdNovo);
+            expect(novoAcordo.estadoCumprimento).toBe('pendente');
+
+            const taskDepois = await taskRepository.findById(taskNova.id);
+            expect(taskDepois!.acordoAtualId).toBe(novoAcordo.id);
+            expect(taskDepois!.numTentativas).toBe(0);
+
+            const historico = await acordoRepository.findHistoryByTaskId(taskNova.id);
+            expect(historico).toHaveLength(1);
+            return;
+          }
+
+          // Demais branches: a Task_Com_Acordo recebe primeiro seu Acordo_Atual
+          // (do Tipo_de_Acordo controlado por `nomeTipoVelho`).
+          const acordoVelho = await service.registrarAcordo(taskNova.id, tipoAcordoIdVelho);
+          expect(acordoVelho.estadoCumprimento).toBe('pendente');
+
+          if (branch === 'jaAvaliado') {
+            // O Acordo_Atual já foi avaliado (cumprido ou não cumprido,
+            // randomizado) antes da chamada testada.
+            await acordoRepository.update(acordoVelho.id, { estadoCumprimento: estadoAnterior });
+
+            const taskAntes = await taskRepository.findById(taskNova.id);
+
+            // a confirmação (randomizada) é ignorada quando enviada
+            // (Requirement 8.4): o registro prossegue normalmente de qualquer forma.
+            const options = confirmacaoEnviada ? { confirmaCumprimentoAcordoAtual: true } : undefined;
+            const novoAcordo = await service.registrarAcordo(taskNova.id, tipoAcordoIdNovo, undefined, options);
+
+            expect(novoAcordo.tipoAcordoId).toBe(tipoAcordoIdNovo);
+            expect(novoAcordo.estadoCumprimento).toBe('pendente');
+
+            const taskDepois = await taskRepository.findById(taskNova.id);
+            expect(taskDepois!.acordoAtualId).toBe(novoAcordo.id);
+            // numTentativas não é afetado pelo registro do próximo Acordo,
+            // independentemente da confirmação enviada.
+            expect(taskDepois!.numTentativas).toBe(taskAntes!.numTentativas);
+
+            // o Acordo anterior (já avaliado) permanece no histórico, inalterado.
+            const acordoVelhoDepois = await acordoRepository.findById(acordoVelho.id);
+            expect(acordoVelhoDepois!.estadoCumprimento).toBe(estadoAnterior);
+
+            const historico = await acordoRepository.findHistoryByTaskId(taskNova.id);
+            expect(historico).toHaveLength(2);
+            return;
+          }
+
+          if (branch === 'pendenteConfirmado') {
+            // Acordo_Atual `pendente`, Tipo_de_Acordo diferente de "Finalizar",
+            // com confirmação enviada -> avalia como cumprido e registra o
+            // novo Acordo em uma única operação (Requirement 8.2), sem
+            // alterar numTentativas.
+            const novoAcordo = await service.registrarAcordo(taskNova.id, tipoAcordoIdNovo, undefined, {
+              confirmaCumprimentoAcordoAtual: true,
+            });
+
+            // o novo Acordo foi registrado e passou a ser o Acordo_Atual
+            expect(novoAcordo.id).not.toBe(acordoVelho.id);
+            expect(novoAcordo.tipoAcordoId).toBe(tipoAcordoIdNovo);
+            expect(novoAcordo.estadoCumprimento).toBe('pendente');
+
+            const taskDepois = await taskRepository.findById(taskNova.id);
+            expect(taskDepois!.acordoAtualId).toBe(novoAcordo.id);
+            expect(taskDepois!.concluida).toBe(false);
+            // avaliação como cumprido nunca incrementa numTentativas
+            expect(taskDepois!.numTentativas).toBe(0);
+
+            // o Acordo_Atual anterior foi avaliado como cumprido e preservado
+            // no histórico, substituído (não excluído) pelo novo.
+            const acordoVelhoDepois = await acordoRepository.findById(acordoVelho.id);
+            expect(acordoVelhoDepois!.estadoCumprimento).toBe('cumprido');
+
+            const historico = await acordoRepository.findHistoryByTaskId(taskNova.id);
+            expect(historico).toHaveLength(2);
+            expect(historico.map((a) => a.id).sort()).toEqual([acordoVelho.id, novoAcordo.id].sort());
+            return;
+          }
+
+          // branch === 'pendenteFinalizar': Acordo_Atual `pendente` cujo
+          // Tipo_de_Acordo é exatamente "Finalizar", com confirmação enviada
+          // -> avalia como cumprido, marca Task.concluida = true e NÃO
+          // registra nenhum novo Acordo (Requirement 8.7).
+          const acordoRetornado = await service.registrarAcordo(taskNova.id, tipoAcordoIdNovo, undefined, {
+            confirmaCumprimentoAcordoAtual: true,
+          });
+
+          // o Acordo retornado é o próprio Acordo_Atual avaliado, não um novo Acordo
+          expect(acordoRetornado.id).toBe(acordoVelho.id);
+          expect(acordoRetornado.estadoCumprimento).toBe('cumprido');
+
+          const taskDepois = await taskRepository.findById(taskNova.id);
+          // nenhum novo Acordo substitui o Acordo_Atual: a referência permanece a mesma
+          expect(taskDepois!.acordoAtualId).toBe(acordoVelho.id);
+          expect(taskDepois!.concluida).toBe(true);
+          expect(taskDepois!.numTentativas).toBe(0);
+
+          // nenhum novo Acordo foi persistido para a Task
+          const historico = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          expect(historico).toHaveLength(1);
+          expect(historico[0]!.id).toBe(acordoVelho.id);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+// Property-based test for the confirmation guard added to `registrarAcordo`
+// (task 3.8, Requirement 8.11): when the Task's Acordo_Atual is `pendente`
+// and the caller submits a registration WITHOUT confirming that this
+// Acordo_Atual was cumprido — either by omitting
+// `confirmaCumprimentoAcordoAtual` entirely (no `options` argument, or
+// `options` present without that field) or by sending it explicitly as
+// `false` — the registration must be rejected with `ValidationError
+// CONFIRMACAO_CUMPRIMENTO_OBRIGATORIA` and leave every observable piece of
+// state untouched: the Acordo_Atual (same id, still `pendente`, same
+// motivo), o Nº_Tentativas, o Nº_Tentativas_Avaliar_Planejar, o
+// Responsável e o histórico de Acordos da Task — regardless of the other
+// option fields sent alongside it (`repeteAcordoNaoCumprido`) or of the
+// `responsavelId` argument passed to the rejected call.
+describe('AcordoService.registrarAcordo — confirmação de cumprimento obrigatória (Property 15)', () => {
+  // Property 15: Confirmação de cumprimento é obrigatória com Acordo_Atual pendente
+  // Validates: Requirements 8.11
+  it('Feature: melhorias-acordos, Property 15: Confirmação de cumprimento é obrigatória com Acordo_Atual pendente', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.tuple(fc.uuid(), fc.uuid()).filter(([a, b]) => a !== b),
+        fc.uuid(),
+        // Como a confirmação está ausente/negativa é decidido por este
+        // gerador; cobre tanto a omissão total do campo (sem `options` ou
+        // `options` sem o campo) quanto o envio explícito de `false`.
+        fc.constantFrom<'sem_options' | 'options_sem_campo' | 'campo_false'>(
+          'sem_options',
+          'options_sem_campo',
+          'campo_false',
+        ),
+        // outro campo de `options`, cujo valor não deve ter nenhum efeito
+        // sobre a rejeição desta operação.
+        fc.boolean(),
+        // `responsavelId` passado à chamada rejeitada — arbitrário,
+        // inclusive um id que não pertence ao Cadastro_de_Usuários, já que
+        // a confirmação é validada antes de qualquer outra verificação.
+        fc.option(fc.uuid(), { nil: undefined }),
+        async (
+          titulo,
+          [tipoAcordoIdVelho, tipoAcordoIdNovo],
+          responsavelIdInicial,
+          confirmMode,
+          repeteAcordoNaoCumprido,
+          responsavelIdChamada,
+        ) => {
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+            { id: tipoAcordoIdVelho, nome: 'Enviar para review' },
+            { id: tipoAcordoIdNovo, nome: 'Enviar para review' },
+          ]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup([responsavelIdInicial]);
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+          );
+
+          const taskNova = await criarTaskNova(taskRepository, titulo);
+
+          // Acordo_Atual pendente, com Responsável inicial definido.
+          const acordoVelho = await service.registrarAcordo(taskNova.id, tipoAcordoIdVelho, responsavelIdInicial);
+          expect(acordoVelho.estadoCumprimento).toBe('pendente');
+
+          const taskAntes = await taskRepository.findById(taskNova.id);
+          const numTentativasAntes = taskAntes!.numTentativas;
+          const tentativasAvaliarPlanejarAntes = taskAntes!.tentativasAvaliarPlanejar;
+          const responsavelIdAntes = taskAntes!.responsavelId;
+
+          const options =
+            confirmMode === 'sem_options'
+              ? undefined
+              : confirmMode === 'options_sem_campo'
+                ? { repeteAcordoNaoCumprido }
+                : { confirmaCumprimentoAcordoAtual: false as const, repeteAcordoNaoCumprido };
+
+          let erroCapturado: unknown;
+          try {
+            await service.registrarAcordo(taskNova.id, tipoAcordoIdNovo, responsavelIdChamada, options);
+          } catch (erro) {
+            erroCapturado = erro;
+          }
+
+          expect(erroCapturado).toBeInstanceOf(ValidationError);
+          expect((erroCapturado as ValidationError).codigo).toBe('CONFIRMACAO_CUMPRIMENTO_OBRIGATORIA');
+
+          // o Acordo_Atual permanece exatamente o mesmo, ainda pendente e
+          // sem motivo associado.
+          const acordoDepois = await acordoRepository.findById(acordoVelho.id);
+          expect(acordoDepois!.id).toBe(acordoVelho.id);
+          expect(acordoDepois!.estadoCumprimento).toBe('pendente');
+          expect(acordoDepois!.motivoNaoCumprimentoId).toBeFalsy();
+
+          // o Nº_Tentativas, o Nº_Tentativas_Avaliar_Planejar e o
+          // Responsável da Task permanecem inalterados.
+          const taskDepois = await taskRepository.findById(taskNova.id);
+          expect(taskDepois!.acordoAtualId).toBe(acordoVelho.id);
+          expect(taskDepois!.numTentativas).toBe(numTentativasAntes);
+          expect(taskDepois!.tentativasAvaliarPlanejar).toBe(tentativasAvaliarPlanejarAntes);
+          expect(taskDepois!.responsavelId).toBe(responsavelIdAntes);
+
+          // nenhum novo Acordo foi persistido para a Task.
+          const historico = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          expect(historico).toHaveLength(1);
+          expect(historico[0]!.id).toBe(acordoVelho.id);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+// Property-based test for the "Avaliar e planejar" consecutive-cycle
+// counter (`Task.tentativasAvaliarPlanejar`), exercised end-to-end through
+// the *público* caminho real de avaliação usado pelo Sistema (task 3.11,
+// Requirements 8.9, 8.10):
+// - quando o Acordo_Atual pendente é de Tipo_de_Acordo "Avaliar e
+//   planejar", a única avaliação possível é `cumprido`, obtida via
+//   `registrarAcordo(..., { confirmaCumprimentoAcordoAtual: true })`
+//   (Registro_de_Acordo_com_Avaliacao) — `avaliarAcordoAtual`/
+//   `marcarNaoCumprido` bloqueiam `nao_cumprido` para esse Tipo_de_Acordo
+//   (Requirement 5.2), então essa combinação nunca é gerada;
+// - quando o Acordo_Atual pendente é de qualquer outro Tipo_de_Acordo, a
+//   avaliação pode ser `cumprido` (mesmo caminho de confirmação embutida)
+//   ou `nao_cumprido` (via `marcarNaoCumprido`, seguido do registro do
+//   próximo Acordo sem exigir confirmação, já que o Acordo_Atual anterior
+//   já foi avaliado).
+//
+// O modelo de referência recalcula, a cada ciclo, se a condição de
+// incremento (Requirement 8.9) é satisfeita a partir do estado conhecido
+// pelo teste — Acordo_Atual anterior "Avaliar e planejar" avaliado como
+// cumprido **e** novo Acordo também "Avaliar e planejar" — e reinicia o
+// contador a zero em qualquer outra combinação (Requirement 8.10),
+// comparando com o valor persistido pelo serviço após cada passo.
+describe('AcordoService.registrarAcordo — Property 17: cadeia de ciclos de "Avaliar e planejar"', () => {
+  const NOME_AVALIAR_E_PLANEJAR = 'Avaliar e planejar';
+  const NOME_OUTRO_TIPO = 'Enviar para review';
+
+  // Property 17: Cadeia de ciclos de "Avaliar e planejar"
+  // Validates: Requirements 8.9, 8.10
+  it('Feature: melhorias-acordos, Property 17: Cadeia de ciclos de "Avaliar e planejar"', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom<'avaliarPlanejar' | 'outro'>('avaliarPlanejar', 'outro'),
+        fc.array(
+          fc.record({
+            proximoTipo: fc.constantFrom<'avaliarPlanejar' | 'outro'>('avaliarPlanejar', 'outro'),
+            // Só tem efeito quando o Tipo_de_Acordo do Acordo_Atual em curso
+            // for diferente de "Avaliar e planejar" — para "Avaliar e
+            // planejar" a única avaliação possível é `cumprido`.
+            resultadoQuandoOutroTipo: fc.constantFrom<'cumprido' | 'nao_cumprido'>('cumprido', 'nao_cumprido'),
+          }),
+          { minLength: 1, maxLength: 15 },
+        ),
+        async (tipoInicial, ciclos) => {
+          const idAvaliarPlanejar = randomUUID();
+          const idOutroTipo = randomUUID();
+          const idPorTag = { avaliarPlanejar: idAvaliarPlanejar, outro: idOutroTipo } as const;
+
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+            { id: idAvaliarPlanejar, nome: NOME_AVALIAR_E_PLANEJAR },
+            { id: idOutroTipo, nome: NOME_OUTRO_TIPO },
+          ]);
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup();
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+          );
+
+          const taskNova = await criarTaskNova(taskRepository, 'Task de teste');
+
+          // Primeiro Acordo (Task_Nova, sem Acordo_Atual anterior): nunca
+          // incrementa o contador.
+          await service.registrarAcordo(taskNova.id, idPorTag[tipoInicial]);
+
+          let tipoAtual: 'avaliarPlanejar' | 'outro' = tipoInicial;
+          let numTentativasEsperado = 0;
+          let contadorEsperado = 0;
+
+          for (const ciclo of ciclos) {
+            // "Avaliar e planejar" só pode ser avaliado como cumprido
+            // (Requirement 5.2 bloqueia não cumprimento para esse tipo).
+            const resultado: 'cumprido' | 'nao_cumprido' =
+              tipoAtual === 'avaliarPlanejar' ? 'cumprido' : ciclo.resultadoQuandoOutroTipo;
+
+            const incrementaEsperado =
+              tipoAtual === 'avaliarPlanejar' && resultado === 'cumprido' && ciclo.proximoTipo === 'avaliarPlanejar';
+
+            if (resultado === 'cumprido') {
+              // Registro_de_Acordo_com_Avaliacao: avalia o Acordo_Atual
+              // pendente como cumprido e registra o novo Acordo em uma
+              // única operação (Requirements 8.2, 8.9).
+              await service.registrarAcordo(taskNova.id, idPorTag[ciclo.proximoTipo], undefined, {
+                confirmaCumprimentoAcordoAtual: true,
+              });
+            } else {
+              // Marca o Acordo_Atual pendente (de Tipo_de_Acordo diferente
+              // de "Avaliar e planejar") como não cumprido e, em seguida,
+              // registra o próximo Acordo — o Acordo_Atual já avaliado não
+              // exige confirmação.
+              await service.marcarNaoCumprido(taskNova.id);
+              await service.registrarAcordo(taskNova.id, idPorTag[ciclo.proximoTipo]);
+              numTentativasEsperado += 1;
+            }
+
+            contadorEsperado = incrementaEsperado ? contadorEsperado + 1 : 0;
+
+            const task = await taskRepository.findById(taskNova.id);
+            // Requirements 8.9, 8.10: o contador incrementa em exatamente 1
+            // apenas na combinação descrita, e reinicia a 0 em qualquer
+            // outra.
+            expect(task!.tentativasAvaliarPlanejar).toBe(contadorEsperado);
+            // Sanidade: o não cumprimento nunca afeta este contador, apenas
+            // numTentativas (verificado por outras propriedades).
+            expect(task!.numTentativas).toBe(numTentativasEsperado);
+
+            tipoAtual = ciclo.proximoTipo;
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+// Property-based test for the conditional Responsável update performed by
+// `completarRegistro` (task 3.12, Requirements 9.2, 9.3, 9.8, 9.9): the same
+// logic is reached both by the plain registration path (Task_Nova, or an
+// already-evaluated Acordo_Atual) and by the Registro_de_Acordo_com_Avaliacao
+// path (Acordo_Atual `pendente` + `confirmaCumprimentoAcordoAtual: true`),
+// so the generator below exercises `estadoInicial` across all four
+// possibilities and combines it with every `inputBranch`:
+// - 'valido': a Responsável belonging to the Cadastro_de_Usuários is
+//   informed -> the Task's Responsável must become exactly that
+//   Usuário_Cadastrado (Requirements 9.2, 9.3).
+// - 'ausente'/'vazio': no Responsável is informed (parameter omitted, or an
+//   empty/whitespace-only string that trims to nothing) -> the Task's
+//   current Responsável must be preserved unchanged (Requirement 9.8).
+// - 'invalido': a Responsável that does not belong to the
+//   Cadastro_de_Usuários is informed -> the whole registration is rejected
+//   with `ValidationError`, and the Task's `acordoAtualId` (same reference)
+//   and `responsavelId` remain exactly as they were immediately before the
+//   call, with no new Acordo appended to the history (Requirement 9.9).
+//   For `estadoInicial === 'pendente'` this assertion is scoped to what
+//   `completarRegistro` itself guarantees (the Responsável check happens
+//   before any Task write): whether the just-evaluated Acordo_Atual's own
+//   `estadoCumprimento` survives the rejection end-to-end is an atomicity
+//   concern covered separately by Property 13 (task 3.13), which exercises
+//   a real transaction/rollback instead of the passthrough test runner.
+describe('AcordoService.registrarAcordo — Property 24: atualização condicional do Responsável', () => {
+  const NOME_OUTRO_TIPO = 'Enviar para review';
+
+  // Property 24: Atualização condicional do Responsável no registro de Acordo
+  // Validates: Requirements 9.2, 9.3, 9.8, 9.9
+  it('Feature: melhorias-acordos, Property 24: Atualização condicional do Responsável no registro de Acordo', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.tuple(fc.uuid(), fc.uuid()).filter(([a, b]) => a !== b),
+        fc.tuple(fc.uuid(), fc.uuid()).filter(([a, b]) => a !== b),
+        fc.constantFrom<'novo' | 'avaliadoCumprido' | 'avaliadoNaoCumprido' | 'pendente'>(
+          'novo',
+          'avaliadoCumprido',
+          'avaliadoNaoCumprido',
+          'pendente',
+        ),
+        fc.boolean(),
+        fc.constantFrom<'valido' | 'ausente' | 'vazio' | 'invalido'>('valido', 'ausente', 'vazio', 'invalido'),
+        fc.constantFrom('', '   ', '\t\n'),
+        async (
+          titulo,
+          [tipoAcordoIdInicial, tipoAcordoIdProximo],
+          [responsavelIdValido, responsavelIdInvalido],
+          estadoInicial,
+          taskComecaComResponsavel,
+          inputBranch,
+          valorVazio,
+        ) => {
+          const taskRepository = new InMemoryTaskRepository();
+          const acordoRepository = new InMemoryAcordoRepository();
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+            { id: tipoAcordoIdInicial, nome: NOME_OUTRO_TIPO },
+            { id: tipoAcordoIdProximo, nome: NOME_OUTRO_TIPO },
+          ]);
+          // Cadastro_de_Usuários contém apenas responsavelIdValido;
+          // responsavelIdInvalido nunca pertence a ele.
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup([responsavelIdValido]);
+
+          const service = construirAcordoServicoDeTeste(
+            taskRepository as unknown as TaskRepository,
+            acordoRepository as unknown as AcordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+          );
+
+          const taskInicial = await taskRepository.create({
+            titulo,
+            responsavelId: taskComecaComResponsavel ? responsavelIdValido : undefined,
+            ordemExibicao: 0,
+          });
+
+          let acordoAtualAnteriorId: string | null = null;
+          if (estadoInicial !== 'novo') {
+            const acordoInicial = await service.registrarAcordo(taskInicial.id, tipoAcordoIdInicial);
+            acordoAtualAnteriorId = acordoInicial.id;
+
+            if (estadoInicial === 'avaliadoCumprido') {
+              await acordoRepository.update(acordoInicial.id, { estadoCumprimento: 'cumprido' });
+            } else if (estadoInicial === 'avaliadoNaoCumprido') {
+              await acordoRepository.update(acordoInicial.id, { estadoCumprimento: 'nao_cumprido' });
+            }
+            // 'pendente': mantém o Acordo_Atual pendente, sem avaliação —
+            // exercitando o Registro_de_Acordo_com_Avaliacao a seguir.
+          }
+
+          const taskAntes = await taskRepository.findById(taskInicial.id);
+          const historicoAntes = await acordoRepository.findHistoryByTaskId(taskInicial.id);
+
+          // Acordo_Atual pendente exige a confirmação para que o registro
+          // do próximo Acordo prossiga (Requirement 8.11); os demais
+          // estados iniciais não exigem nem usam esse campo.
+          const options = estadoInicial === 'pendente' ? { confirmaCumprimentoAcordoAtual: true as const } : undefined;
+
+          let responsavelIdParaChamada: string | undefined;
+          if (inputBranch === 'valido') {
+            responsavelIdParaChamada = responsavelIdValido;
+          } else if (inputBranch === 'invalido') {
+            responsavelIdParaChamada = responsavelIdInvalido;
+          } else if (inputBranch === 'vazio') {
+            responsavelIdParaChamada = valorVazio;
+          } else {
+            responsavelIdParaChamada = undefined;
+          }
+
+          if (inputBranch === 'invalido') {
+            let erroCapturado: unknown;
+            try {
+              await service.registrarAcordo(taskInicial.id, tipoAcordoIdProximo, responsavelIdParaChamada, options);
+            } catch (erro) {
+              erroCapturado = erro;
+            }
+
+            expect(erroCapturado).toBeInstanceOf(ValidationError);
+            expect((erroCapturado as ValidationError).codigo).toBe('RESPONSAVEL_NAO_CADASTRADO');
+
+            const taskDepois = await taskRepository.findById(taskInicial.id);
+            // Requirement 9.9: o registro completo é rejeitado, preservando a
+            // referência ao Acordo_Atual e o Responsável atual da Task.
+            expect(taskDepois!.acordoAtualId).toBe(taskAntes!.acordoAtualId);
+            expect(taskDepois!.responsavelId).toBe(taskAntes!.responsavelId);
+
+            // nenhum novo Acordo foi persistido para a Task.
+            const historicoDepois = await acordoRepository.findHistoryByTaskId(taskInicial.id);
+            expect(historicoDepois.map((a) => a.id).sort()).toEqual(historicoAntes.map((a) => a.id).sort());
+            return;
+          }
+
+          // Branches 'valido', 'ausente' e 'vazio': o registro prossegue com sucesso.
+          const novoAcordo = await service.registrarAcordo(
+            taskInicial.id,
+            tipoAcordoIdProximo,
+            responsavelIdParaChamada,
+            options,
+          );
+
+          const taskDepois = await taskRepository.findById(taskInicial.id);
+
+          if (inputBranch === 'valido') {
+            // Requirements 9.2, 9.3: o Responsável passa a ser exatamente o
+            // Usuário_Cadastrado informado, independentemente do Responsável
+            // anterior (definido ou não).
+            expect(taskDepois!.responsavelId).toBe(responsavelIdValido);
+          } else {
+            // Requirement 9.8: sem Responsável informado — omitido, `undefined`
+            // ou string vazia/apenas espaços após trim —, o Responsável atual
+            // da Task é preservado exatamente como estava antes da chamada.
+            expect(taskDepois!.responsavelId).toBe(taskAntes!.responsavelId);
+          }
+
+          // Em qualquer um desses branches o registro do novo Acordo prossegue
+          // normalmente, tanto no caminho simples quanto no
+          // Registro_de_Acordo_com_Avaliacao.
+          expect(taskDepois!.acordoAtualId).toBe(novoAcordo.id);
+          expect(novoAcordo.tipoAcordoId).toBe(tipoAcordoIdProximo);
+          expect(novoAcordo.estadoCumprimento).toBe('pendente');
+
+          if (acordoAtualAnteriorId !== null) {
+            expect(taskDepois!.acordoAtualId).not.toBe(acordoAtualAnteriorId);
+          }
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+});
+
+// Property 13: Atomicidade — rejeição implica estado inalterado
+// Validates: Requirements 3.9, 4.8, 8.5, 10.5
+//
+// Exercises the two multi-write combined operations `AcordoService` runs
+// inside `runTransaction` — `repetirUltimoAcordo` (avaliação + registro,
+// task 3.6) and the Registro_de_Acordo_com_Avaliacao branch of
+// `registrarAcordo` (avaliação + registro, task 3.8), gated on
+// `confirmaCumprimentoAcordoAtual: true` with a `pendente` Acordo_Atual —
+// and, for each, a step of that operation that gets rejected:
+// - 'tipoAcordoInvalido' (registroComAvaliacao only): the new Acordo's
+//   Tipo_de_Acordo does not belong to the Cadastro_de_Tipos_de_Acordo —
+//   rejected before the transaction even opens.
+// - 'responsavelInvalido' (registroComAvaliacao only): the Responsável
+//   informed does not belong to the Cadastro_de_Usuários — rejected
+//   inside the transaction, **after** the embedded avaliação (cumprido)
+//   has already written to both the Acordo and the Task.
+// - 'motivoAcimaDoLimite' (repetir only): the motivoNome informed exceeds
+//   the 100-character limit — rejected by `resolverMotivo`, before any
+//   write of the operation.
+// - 'falhaCreateAcordo' / 'falhaUpdateTask' (both operations): an
+//   unconditional failure is injected into the fake repository's
+//   `create`/`update`, at the exact call belonging to this operation's
+//   *last* write — after every other write of the operation (including
+//   the embedded avaliação) has already happened — simulating an
+//   infrastructure failure at the very end of the combined operation.
+//
+// The in-memory fakes used elsewhere in this file have no real
+// transactional behaviour (their TransactionRunner is a plain
+// passthrough, `(fn) => fn(this)` — see `construirAcordoServicoDeTeste`),
+// which is exactly why Property 24's own atomicity assertion is scoped to
+// what `completarRegistro` alone guarantees. This test instead builds a
+// TransactionRunner that genuinely simulates `prisma.$transaction`'s
+// rollback contract (Requirement 10.5): every fake repository is
+// snapshotted right before the callback runs, and restored to that
+// snapshot when the callback throws — so a failure injected *after*
+// earlier writes of the same combined operation actually exercises a
+// rollback, instead of merely proving "no write was ever attempted".
+//
+// For every branch, takes a full snapshot of the Task (`findById`), the
+// Acordo history (`findHistoryByTaskId`) and the Cadastro_de_Motivos_de_
+// Nao_Cumprimento (`list()`) immediately before the rejected call and
+// asserts it is deep-equal to the same snapshot taken right after the
+// rejection — proving zero observable side effects, including the
+// absence of any value the operation attempted to create inline.
+describe('AcordoService — Property 13: Atomicidade (rejeição implica estado inalterado)', () => {
+  const NOME_OUTRO_TIPO = 'Enviar para review';
+
+  /**
+   * Wraps InMemoryAcordoRepository, injecting an unconditional failure on
+   * the Nth call (1-indexed) to `create` or `update` — used to simulate
+   * an infrastructure failure at a specific write of a combined
+   * operation. `snapshot`/`restore` are inherited unchanged, since they
+   * operate on the same underlying in-memory state as the base class.
+   */
+  class AcordoRepositoryComFalhaInjetada extends InMemoryAcordoRepository {
+    private chamadasCreate = 0;
+    private chamadasUpdate = 0;
+    private readonly falha: { metodo: 'create' | 'update'; naChamada: number } | null;
+
+    constructor(falha: { metodo: 'create' | 'update'; naChamada: number } | null) {
+      super();
+      this.falha = falha;
+    }
+
+    async create(data: AcordoCreateData): Promise<Acordo> {
+      this.chamadasCreate += 1;
+      if (this.falha?.metodo === 'create' && this.chamadasCreate === this.falha.naChamada) {
+        throw new Error('Falha injetada em AcordoRepository.create (task 3.13)');
+      }
+      return super.create(data);
+    }
+
+    async update(id: string, data: AcordoUpdateData): Promise<Acordo> {
+      this.chamadasUpdate += 1;
+      if (this.falha?.metodo === 'update' && this.chamadasUpdate === this.falha.naChamada) {
+        throw new Error('Falha injetada em AcordoRepository.update (task 3.13)');
+      }
+      return super.update(id, data);
+    }
+  }
+
+  /** Same idea as AcordoRepositoryComFalhaInjetada, injecting a failure into TaskRepository.update. */
+  class TaskRepositoryComFalhaInjetada extends InMemoryTaskRepository {
+    private chamadasUpdate = 0;
+    private readonly falha: { metodo: 'update'; naChamada: number } | null;
+
+    constructor(falha: { metodo: 'update'; naChamada: number } | null) {
+      super();
+      this.falha = falha;
+    }
+
+    async update(id: string, data: TaskUpdateData): Promise<Task> {
+      this.chamadasUpdate += 1;
+      if (this.falha?.metodo === 'update' && this.chamadasUpdate === this.falha.naChamada) {
+        throw new Error('Falha injetada em TaskRepository.update (task 3.13)');
+      }
+      return super.update(id, data);
+    }
+  }
+
+  /**
+   * Builds an AcordoService whose TransactionRunner genuinely simulates
+   * `prisma.$transaction`'s rollback contract (Requirement 10.5): every
+   * fake repository is snapshotted before the callback runs, and
+   * restored to that snapshot if the callback throws. Unlike
+   * `construirAcordoServicoDeTeste`'s plain passthrough runner (task
+   * 1.2), this is required here so that a failure injected *after*
+   * earlier writes of the same combined operation actually exercises a
+   * rollback, instead of merely proving "no write was attempted".
+   */
+  function construirServicoComRollback(
+    taskRepository: InMemoryTaskRepository,
+    acordoRepository: InMemoryAcordoRepository,
+    tipoAcordoRepository: InMemoryTipoAcordoLookup,
+    usuarioCadastradoRepository: InMemoryCadastroLookup,
+    motivoNaoCumprimentoRepository: InMemoryMotivoRepository,
+  ): AcordoService {
+    let svc: AcordoService;
+    const runner: TransactionRunner = async (fn) => {
+      const taskSnapshot = taskRepository.snapshot();
+      const acordoSnapshot = acordoRepository.snapshot();
+      const motivoSnapshot = motivoNaoCumprimentoRepository.snapshot();
+      try {
+        return await fn(svc);
+      } catch (erro) {
+        taskRepository.restore(taskSnapshot);
+        acordoRepository.restore(acordoSnapshot);
+        motivoNaoCumprimentoRepository.restore(motivoSnapshot);
+        throw erro;
+      }
+    };
+    svc = new AcordoService(
+      taskRepository as unknown as TaskRepository,
+      acordoRepository as unknown as AcordoRepository,
+      tipoAcordoRepository,
+      usuarioCadastradoRepository,
+      undefined,
+      motivoNaoCumprimentoRepository,
+      runner,
+    );
+    return svc;
+  }
+
+  // 'repetir': etapas de AcordoService.repetirUltimoAcordo.
+  // 'registroComAvaliacao': etapas do Registro_de_Acordo_com_Avaliacao
+  // (registrarAcordo com Acordo_Atual pendente + confirmação).
+  const cenarioArb = fc.oneof(
+    fc.record({
+      operacao: fc.constant<'repetir'>('repetir'),
+      branch: fc.constantFrom<'motivoAcimaDoLimite' | 'falhaCreateAcordo' | 'falhaUpdateTask'>(
+        'motivoAcimaDoLimite',
+        'falhaCreateAcordo',
+        'falhaUpdateTask',
+      ),
+    }),
+    fc.record({
+      operacao: fc.constant<'registroComAvaliacao'>('registroComAvaliacao'),
+      branch: fc.constantFrom<'tipoAcordoInvalido' | 'responsavelInvalido' | 'falhaCreateAcordo' | 'falhaUpdateTask'>(
+        'tipoAcordoInvalido',
+        'responsavelInvalido',
+        'falhaCreateAcordo',
+        'falhaUpdateTask',
+      ),
+    }),
+  );
+
+  it('Feature: melhorias-acordos, Property 13: Atomicidade — rejeição implica estado inalterado', async () => {
+    /** A non-whitespace character, safe for building names whose length survives trim(). */
+    const charNaoEspacoArb = fc.char().filter((c) => c.trim().length > 0);
+
+    /** A motivoNome whose trim() has between 101 and 150 characters (strictly above the limit, Requirement 3.8). */
+    const nomeAcimaDoLimiteArb = fc
+      .array(charNaoEspacoArb, { minLength: 101, maxLength: 150 })
+      .map((chars) => chars.join(''));
+
+    await fc.assert(
+      fc.asyncProperty(
+        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.tuple(fc.uuid(), fc.uuid(), fc.uuid()).filter(([a, b, c]) => a !== b && a !== c && b !== c),
+        fc.tuple(fc.uuid(), fc.uuid()).filter(([a, b]) => a !== b),
+        cenarioArb,
+        nomeAcimaDoLimiteArb,
+        async (
+          titulo,
+          [tipoAcordoIdInicial, tipoAcordoIdNovo, tipoAcordoIdInvalido],
+          [responsavelIdValido, responsavelIdInvalido],
+          cenario,
+          nomeMotivoAcimaDoLimite,
+        ) => {
+          const falhaCreateAcordo = cenario.branch === 'falhaCreateAcordo';
+          const falhaUpdateTask = cenario.branch === 'falhaUpdateTask';
+
+          // A 1ª chamada (#1) de cada método é sempre a escrita de setup
+          // do primeiro Acordo (abaixo, fora da operação testada); a
+          // escrita injetada com falha é sempre a última da própria
+          // operação combinada — depois de toda escrita anterior dela
+          // (inclusive a avaliação embutida) já ter acontecido.
+          const NA_CHAMADA_CREATE_ACORDO_DA_OPERACAO = 2;
+          const NA_CHAMADA_UPDATE_TASK_DA_OPERACAO = 3;
+
+          const taskRepository = new TaskRepositoryComFalhaInjetada(
+            falhaUpdateTask ? { metodo: 'update', naChamada: NA_CHAMADA_UPDATE_TASK_DA_OPERACAO } : null,
+          );
+          const acordoRepository = new AcordoRepositoryComFalhaInjetada(
+            falhaCreateAcordo ? { metodo: 'create', naChamada: NA_CHAMADA_CREATE_ACORDO_DA_OPERACAO } : null,
+          );
+          const tipoAcordoRepository = new InMemoryTipoAcordoLookup([
+            { id: tipoAcordoIdInicial, nome: NOME_OUTRO_TIPO },
+            { id: tipoAcordoIdNovo, nome: NOME_OUTRO_TIPO },
+          ]);
+          // Cadastro_de_Usuários contém apenas responsavelIdValido; responsavelIdInvalido nunca pertence a ele.
+          const usuarioCadastradoRepository = new InMemoryCadastroLookup([responsavelIdValido]);
+          const motivoNaoCumprimentoRepository = new InMemoryMotivoRepository(['Motivo já cadastrado']);
+
+          const service = construirServicoComRollback(
+            taskRepository,
+            acordoRepository,
+            tipoAcordoRepository,
+            usuarioCadastradoRepository,
+            motivoNaoCumprimentoRepository,
+          );
+
+          // Setup (fora da operação testada): Task_Com_Acordo com um
+          // primeiro Acordo, que permanece `pendente` — suficiente tanto
+          // para repetirUltimoAcordo (que aceita Acordo_Atual pendente ou
+          // já avaliado) quanto para o Registro_de_Acordo_com_Avaliacao
+          // (que exige Acordo_Atual pendente).
+          const taskNova = await criarTaskNova(taskRepository, titulo);
+          const acordoInicial = await service.registrarAcordo(taskNova.id, tipoAcordoIdInicial);
+          expect(acordoInicial.estadoCumprimento).toBe('pendente');
+
+          // Snapshot completo imediatamente antes da chamada rejeitada.
+          const taskAntes = await taskRepository.findById(taskNova.id);
+          const historicoAntes = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          const cadastroMotivosAntes = await motivoNaoCumprimentoRepository.list();
+
+          let erroCapturado: unknown;
+          try {
+            if (cenario.operacao === 'repetir') {
+              const motivo =
+                cenario.branch === 'motivoAcimaDoLimite' ? { motivoNome: nomeMotivoAcimaDoLimite } : undefined;
+              await service.repetirUltimoAcordo(taskNova.id, motivo);
+            } else {
+              const tipoAcordoIdParaChamada =
+                cenario.branch === 'tipoAcordoInvalido' ? tipoAcordoIdInvalido : tipoAcordoIdNovo;
+              const responsavelIdParaChamada =
+                cenario.branch === 'responsavelInvalido' ? responsavelIdInvalido : undefined;
+              await service.registrarAcordo(taskNova.id, tipoAcordoIdParaChamada, responsavelIdParaChamada, {
+                confirmaCumprimentoAcordoAtual: true,
+              });
+            }
+          } catch (erro) {
+            erroCapturado = erro;
+          }
+
+          expect(erroCapturado).toBeDefined();
+
+          // Snapshot completo depois da rejeição: idêntico ao estado
+          // imediatamente anterior à submissão — o mesmo Acordo_Atual com
+          // o mesmo estado de cumprimento e o mesmo motivo associado, o
+          // mesmo Nº_Tentativas, o mesmo Nº_Tentativas_Avaliar_Planejar, o
+          // mesmo Responsável, o mesmo histórico completo de Acordos e o
+          // mesmo Cadastro_de_Motivos_de_Nao_Cumprimento — incluindo a
+          // ausência de qualquer valor que a operação tenha tentado criar
+          // inline.
+          const taskDepois = await taskRepository.findById(taskNova.id);
+          const historicoDepois = await acordoRepository.findHistoryByTaskId(taskNova.id);
+          const cadastroMotivosDepois = await motivoNaoCumprimentoRepository.list();
+
+          expect(taskDepois).toEqual(taskAntes);
+          expect(historicoDepois).toEqual(historicoAntes);
+          expect(cadastroMotivosDepois).toEqual(cadastroMotivosAntes);
+        },
+      ),
+      { numRuns: 100 },
+    );
   });
 });

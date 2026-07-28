@@ -1,0 +1,78 @@
+# Override de desenvolvimento, carregado automaticamente pelo Docker
+# Compose junto de docker-compose.yml (convenção do compose: quando
+# presente, docker-compose.override.yml é aplicado sem precisar passar
+# `-f` explicitamente).
+#
+# Troca o target da build para o estágio `dev` de cada Dockerfile (que roda
+# `npm run dev` em vez do build de produção) e monta o código-fonte do host
+# como bind mount, para que alterações em backend/src e frontend/src sejam
+# refletidas nos containers sem precisar rebuildar ou recriar (hot
+# reload/HMR):
+#
+#   docker compose up --build
+#
+# Em produção (CI/deploy), ignore este arquivo explicitamente:
+#
+#   docker compose -f docker-compose.yml up --build
+
+services:
+  backend:
+    build:
+      target: dev
+    volumes:
+      # Bind mount do código-fonte (schema Prisma, migrations, src,
+      # tsconfig) por cima da imagem, para o `tsx watch` detectar
+      # alterações feitas no host.
+      - ./backend/src:/app/backend/src
+      - ./backend/prisma:/app/backend/prisma
+      - ./backend/tsconfig.json:/app/backend/tsconfig.json
+      - ./backend/package.json:/app/backend/package.json
+      - ./backend/docker-entrypoint.dev.sh:/app/docker-entrypoint.dev.sh
+      # Note que backend/generated/ (Prisma Client) NÃO é montado: fica na
+      # camada gravável do container, regenerado pelo entrypoint de dev
+      # (npx prisma generate) a cada start. Assim o diretório `generated/`
+      # do host — vazio ou ausente, já que está no .gitignore — não
+      # sobrescreve o client.
+    healthcheck:
+      # Em dev o `tsx watch` demora mais para religar após uma alteração
+      # (recompila e reinicia o processo); aumentamos os retries/timeout
+      # para o container não ser marcado unhealthy durante um reload.
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build:
+      target: dev
+    # `!override` substitui totalmente o `ports` do docker-compose.yml em
+    # vez de anexar (comportamento padrão de merge para listas): como o
+    # target da porta muda (80 do Nginx -> 5173 do servidor de dev do
+    # Vite), sem isso o Compose tentaria publicar a porta 8081 do host
+    # duas vezes. Mantemos a mesma porta 8081 do host para não mudar a URL
+    # de acesso local entre os dois modos.
+    ports: !override
+      - '8081:5173'
+    environment:
+      # Aponta o proxy do Vite (frontend/vite.config.ts) para o serviço
+      # `backend` pela rede interna do compose, em vez de localhost.
+      BACKEND_DEV_URL: 'http://backend:3001'
+      # Necessário caso o bind mount não propague eventos de arquivo
+      # nativamente (ex.: Docker Desktop no Windows/macOS); sem custo
+      # perceptível no Linux.
+      CHOKIDAR_USEPOLLING: 'true'
+    volumes:
+      - ./frontend/src:/app/frontend/src
+      - ./frontend/public:/app/frontend/public
+      - ./frontend/index.html:/app/frontend/index.html
+      - ./frontend/vite.config.ts:/app/frontend/vite.config.ts
+      - ./frontend/tsconfig.json:/app/frontend/tsconfig.json
+      - ./frontend/tsconfig.app.json:/app/frontend/tsconfig.app.json
+      - ./frontend/tsconfig.node.json:/app/frontend/tsconfig.node.json
+      - ./frontend/package.json:/app/frontend/package.json
+    # A imagem de produção (Nginx) faz healthcheck implícito via
+    # depends_on:condition:service_healthy do backend; o servidor de dev
+    # do Vite não expõe /health, então usamos apenas depends_on simples.
+    depends_on:
+      backend:
+        condition: service_healthy

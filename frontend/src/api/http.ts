@@ -71,7 +71,22 @@ export interface RequestOptions {
   body?: unknown;
   /** Query params a anexar na URL (valores `undefined` são omitidos). */
   query?: Record<string, string | undefined>;
+  /**
+   * Tempo máximo, em milissegundos, para aguardar a resposta antes de
+   * abortar a requisição via `AbortController`. Quando o tempo se
+   * esgota, a requisição é traduzida em uma `ApiError` de falha de
+   * comunicação (ver `TIMEOUT_ERRO`), na mesma forma de qualquer outra
+   * rejeição da API. Sem valor, a requisição não tem timeout aplicado
+   * pelo wrapper.
+   */
+  timeoutMs?: number;
 }
+
+/** `{ codigo, mensagem }` usados quando uma requisição excede seu `timeoutMs` (design.md "Error Handling"). */
+const TIMEOUT_ERRO = {
+  codigo: 'ERRO_COMUNICACAO',
+  mensagem: 'Não foi possível se comunicar com o servidor. Tente novamente.',
+} as const;
 
 function buildUrl(path: string, query?: Record<string, string | undefined>): string {
   // `URL` exige uma base absoluta; quando `API_BASE_URL` está vazia (paths
@@ -101,13 +116,33 @@ function buildUrl(path: string, query?: Record<string, string | undefined>): str
  * `PUT /tasks/:id/ordem`).
  */
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, query } = options;
+  const { method = 'GET', body, query, timeoutMs } = options;
 
-  const response = await fetch(buildUrl(path, query), {
-    method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutId =
+    timeoutMs !== undefined ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+
+  let response: Response;
+  try {
+    response = await fetch(buildUrl(path, query), {
+      method,
+      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (erro) {
+    // Requisição abortada pelo timeout (ou falha de rede antes de chegar
+    // ao backend) — tratada como falha de comunicação (design.md "Error
+    // Handling"), sem status HTTP disponível.
+    if (erro instanceof DOMException && erro.name === 'AbortError') {
+      throw new ApiError(0, TIMEOUT_ERRO.codigo, TIMEOUT_ERRO.mensagem);
+    }
+    throw erro;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 
   if (!response.ok) {
     const { codigo, mensagem } = await extrairErro(response);

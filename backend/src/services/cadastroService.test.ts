@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { ConflictError, NotFoundError, ValidationError } from './errors.js';
-import { CadastroService } from './cadastroService.js';
+import { CadastroService, compararUsuarios } from './cadastroService.js';
 
 /** Row shape used by the fake — mirrors the minimal Prisma model shape. */
 interface FakeRow extends Record<string, unknown> {
@@ -345,5 +345,252 @@ describe('CadastroService.remover', () => {
       ),
       { numRuns: 100 },
     );
+  });
+});
+
+// --- Property 19 fixtures --------------------------------------------
+
+/** Row shape mirroring UsuarioCadastrado (`nomeLogin` instead of `nome`). */
+interface FakeUsuarioRow extends Record<string, unknown> {
+  id: string;
+  nomeLogin: string;
+}
+
+/**
+ * In-memory fake of CadastroRepository for Usuário_Cadastrado. Unlike
+ * `InMemoryCadastroRepository` above (keyed by `nome`), rows are keyed by
+ * `nomeLogin`, matching `usuarioCadastradoRepository`
+ * (backend/src/repositories/cadastroRepository.ts).
+ */
+class InMemoryUsuarioRepository {
+  private readonly rows: FakeUsuarioRow[] = [];
+
+  async list(): Promise<FakeUsuarioRow[]> {
+    return [...this.rows];
+  }
+
+  /**
+   * Seeds the fake directly with pre-built rows (own id + nomeLogin),
+   * bypassing `adicionar`'s uniqueness validation — Property 19 exercises
+   * sets of Usuário_Cadastrado that may be equivalent to each other under
+   * `sensitivity: 'base'` (e.g. "Ana" and "Ána") without necessarily being
+   * rejected by `existsByNameCaseInsensitive` (which only lowercases,
+   * never strips diacritics), so such sets can legitimately coexist in
+   * the real Cadastro_de_Usuários.
+   */
+  seedRows(rows: FakeUsuarioRow[]): void {
+    this.rows.push(...rows);
+  }
+
+  async add(data: { nomeLogin: string }): Promise<FakeUsuarioRow> {
+    const row: FakeUsuarioRow = { id: randomUUID(), nomeLogin: data.nomeLogin };
+    this.rows.push(row);
+    return row;
+  }
+
+  async existsByNameCaseInsensitive(nomeLogin: string): Promise<boolean> {
+    const target = nomeLogin.toLowerCase();
+    return this.rows.some((row) => row.nomeLogin.toLowerCase() === target);
+  }
+
+  async findById(id: string): Promise<FakeUsuarioRow | null> {
+    return this.rows.find((row) => row.id === id) ?? null;
+  }
+
+  async remove(id: string): Promise<void> {
+    const index = this.rows.findIndex((row) => row.id === id);
+    if (index >= 0) this.rows.splice(index, 1);
+  }
+}
+
+/**
+ * Case/accent variants per canonical base letter, used to build
+ * pt-BR-flavored names (e.g. "Água", "Ávila") — the same canonical letter
+ * rendered in different case and diacritic combinations is exactly what
+ * `sensitivity: 'base'` must treat as equivalent (Requirement 6.1).
+ */
+const variantesPorBase: Record<string, string[]> = {
+  a: ['a', 'á', 'à', 'â', 'ã', 'A', 'Á', 'À', 'Â', 'Ã'],
+  e: ['e', 'é', 'ê', 'E', 'É', 'Ê'],
+  i: ['i', 'í', 'I', 'Í'],
+  o: ['o', 'ó', 'ô', 'õ', 'O', 'Ó', 'Ô', 'Õ'],
+  u: ['u', 'ú', 'ü', 'U', 'Ú'],
+  c: ['c', 'ç', 'C', 'Ç'],
+  n: ['n', 'N'],
+  g: ['g', 'G'],
+  b: ['b', 'B'],
+  r: ['r', 'R'],
+  v: ['v', 'V'],
+  l: ['l', 'L'],
+  t: ['t', 'T'],
+  d: ['d', 'D'],
+  m: ['m', 'M'],
+  p: ['p', 'P'],
+  s: ['s', 'S'],
+};
+
+const letraBaseArb = fc.constantFrom(...Object.keys(variantesPorBase));
+
+/** Optional numeric prefix (1-3 digits), used to exercise "dígito antes de letra". */
+const prefixoDigitosArb = fc.option(
+  fc.stringOf(fc.constantFrom('0', '1', '2', '3', '4', '5', '6', '7', '8', '9'), {
+    minLength: 1,
+    maxLength: 3,
+  }),
+  { nil: undefined },
+);
+
+/**
+ * A "grupo" models one canonical name (`baseWord` + optional digit
+ * prefix) rendered by 1-3 `membros` — each a different sequence of
+ * case/accent variant picks for the same letters. All membros of the
+ * same grupo produce nomeLogin values that `sensitivity: 'base'` must
+ * consider equivalent (Requirement 6.2's tiebreak scenario), regardless
+ * of the actual bytes chosen for each rendering.
+ */
+const grupoArb = fc.record({
+  baseWord: fc.array(letraBaseArb, { minLength: 1, maxLength: 6 }),
+  prefixoDigitos: prefixoDigitosArb,
+  membros: fc.array(fc.array(fc.nat(9), { minLength: 1, maxLength: 6 }), {
+    minLength: 1,
+    maxLength: 3,
+  }),
+});
+
+/** Builds the concrete nomeLogin string for one membro of a grupo. */
+function renderizarNomeLogin(
+  grupo: { baseWord: string[]; prefixoDigitos: string | undefined },
+  membro: number[],
+): string {
+  const letras = grupo.baseWord
+    .map((letra, i) => {
+      const variantes = variantesPorBase[letra];
+      return variantes[membro[i % membro.length] % variantes.length];
+    })
+    .join('');
+  return (grupo.prefixoDigitos ?? '') + letras;
+}
+
+describe('CadastroService.listar (Cadastro_de_Usuários)', () => {
+  // Property 19: Ordenação total e determinística do Cadastro_de_Usuários
+  // Validates: Requirements 6.1, 6.2, 6.4, 6.5
+  it('Feature: melhorias-acordos, Property 19: Ordenação total e determinística do Cadastro_de_Usuários', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        // 0 grupos → cadastro vazio; 1 grupo com 1 membro → cadastro unitário;
+        // grupos com 2-3 membros exercitam nomes equivalentes (mesmo baseWord
+        // com variação de caixa/acento/prefixo numérico) e o desempate por id.
+        fc.array(grupoArb, { minLength: 0, maxLength: 8 }),
+        async (grupos) => {
+          const rows: FakeUsuarioRow[] = [];
+          for (const grupo of grupos) {
+            for (const membro of grupo.membros) {
+              rows.push({ id: randomUUID(), nomeLogin: renderizarNomeLogin(grupo, membro) });
+            }
+          }
+
+          const repository = new InMemoryUsuarioRepository();
+          repository.seedRows(rows);
+
+          const service = new CadastroService(repository, {
+            label: 'Usuário',
+            buildCreateInput: (nomeLogin: string) => ({ nomeLogin }),
+            comparar: compararUsuarios,
+          });
+
+          const resultado1 = await service.listar();
+          const resultado2 = await service.listar();
+
+          // Nenhuma perda nem duplicação: mesmos ids e nomes/logins do
+          // conjunto de entrada (Requirements 6.4, 6.5).
+          const chaveDe = (r: { id: string; nomeLogin: string }) => `${r.id}::${r.nomeLogin}`;
+          expect(resultado1.length).toBe(rows.length);
+          expect([...resultado1].map(chaveDe).sort()).toEqual([...rows].map(chaveDe).sort());
+
+          // Ordenação não decrescente segundo uma collation pt-BR
+          // independente (sensitivity: 'base', que ignora caixa e trata
+          // acentuados como equivalentes à letra base, e posiciona dígitos
+          // antes de letras), com desempate crescente por id quando
+          // equivalentes (Requirements 6.1, 6.2).
+          const collatorIndependente = new Intl.Collator('pt-BR', {
+            sensitivity: 'base',
+            usage: 'sort',
+          });
+          for (let i = 1; i < resultado1.length; i++) {
+            const anterior = resultado1[i - 1];
+            const atual = resultado1[i];
+            const cmp = collatorIndependente.compare(anterior.nomeLogin, atual.nomeLogin);
+            if (cmp === 0) {
+              expect(anterior.id <= atual.id).toBe(true);
+            } else {
+              expect(cmp).toBeLessThan(0);
+            }
+          }
+
+          // Duas consultas consecutivas sem alteração no cadastro retornam
+          // a mesma sequência (Requirement 6.2).
+          expect(resultado2.map((r) => r.id)).toEqual(resultado1.map((r) => r.id));
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  // Testes-âncora (task 6.3): exemplos concretos e legíveis por humanos,
+  // complementando a Property 19 acima com casos específicos de
+  // ordenação pt-BR (Requirement 6.1) — acentuação tratada como
+  // equivalente à letra base, e dígitos posicionados antes de letras.
+  it('ordena "Ávila" antes de "Bruno"', async () => {
+    const repository = new InMemoryUsuarioRepository();
+    repository.seedRows([
+      { id: randomUUID(), nomeLogin: 'Bruno' },
+      { id: randomUUID(), nomeLogin: 'Ávila' },
+    ]);
+
+    const service = new CadastroService(repository, {
+      label: 'Usuário',
+      buildCreateInput: (nomeLogin: string) => ({ nomeLogin }),
+      comparar: compararUsuarios,
+    });
+
+    const resultado = await service.listar();
+
+    expect(resultado.map((r) => r.nomeLogin)).toEqual(['Ávila', 'Bruno']);
+  });
+
+  it('ordena "Água" antes de "Alberto"', async () => {
+    const repository = new InMemoryUsuarioRepository();
+    repository.seedRows([
+      { id: randomUUID(), nomeLogin: 'Alberto' },
+      { id: randomUUID(), nomeLogin: 'Água' },
+    ]);
+
+    const service = new CadastroService(repository, {
+      label: 'Usuário',
+      buildCreateInput: (nomeLogin: string) => ({ nomeLogin }),
+      comparar: compararUsuarios,
+    });
+
+    const resultado = await service.listar();
+
+    expect(resultado.map((r) => r.nomeLogin)).toEqual(['Água', 'Alberto']);
+  });
+
+  it('ordena "1-teste" antes de "Alberto" (dígitos antes de letras)', async () => {
+    const repository = new InMemoryUsuarioRepository();
+    repository.seedRows([
+      { id: randomUUID(), nomeLogin: 'Alberto' },
+      { id: randomUUID(), nomeLogin: '1-teste' },
+    ]);
+
+    const service = new CadastroService(repository, {
+      label: 'Usuário',
+      buildCreateInput: (nomeLogin: string) => ({ nomeLogin }),
+      comparar: compararUsuarios,
+    });
+
+    const resultado = await service.listar();
+
+    expect(resultado.map((r) => r.nomeLogin)).toEqual(['1-teste', 'Alberto']);
   });
 });

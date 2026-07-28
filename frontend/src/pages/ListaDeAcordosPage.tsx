@@ -135,25 +135,55 @@ export function ListaDeAcordosPage() {
     newIndex: number,
     movedId: string,
   ) {
-    setLista((listaAtual) => {
-      if (listaAtual === null) return listaAtual;
+    const listaAnterior = lista;
+    if (listaAnterior === null) return;
 
-      const grupoAnterior = listaAtual[grupo] as (TaskNovaItem | TaskComAcordoItem)[];
-      const grupoReordenado = arrayMove(grupoAnterior, oldIndex, newIndex);
-      const novaPosicao = calcularNovaPosicaoGlobal(listaAtual, grupoReordenado, movedId);
-      const listaOtimista = { ...listaAtual, [grupo]: grupoReordenado };
+    const grupoAnterior = listaAnterior[grupo] as (TaskNovaItem | TaskComAcordoItem)[];
+    const grupoReordenado = arrayMove(grupoAnterior, oldIndex, newIndex);
+    const novaPosicao = calcularNovaPosicaoGlobal(listaAnterior, grupoReordenado, movedId);
 
-      reordenarTask(movedId, novaPosicao).catch((error: unknown) => {
-        const mensagem =
-          error instanceof ApiError
-            ? error.message
-            : 'Não foi possível reordenar a Task.';
-        setMensagemErro(mensagem);
-        // Desfaz a reordenação otimista, restaurando o estado anterior.
-        setLista(listaAtual);
-      });
+    // Reconstrói a ordem global e reatribui `ordemExibicao` sequencialmente
+    // (0, 1, 2, ...) exatamente como o backend fará em `reordenarTask` (ver
+    // comentário de topo de arquivo). Sem isso, o `ordemExibicao` de cada
+    // item ficaria defasado após a reordenação otimista — e reordenações
+    // subsequentes (antes de um refetch) calculariam a posição global a
+    // partir de valores desatualizados, persistindo no servidor uma ordem
+    // divergente da exibida. Essa divergência só se tornava visível no
+    // próximo refetch (registrar/finalizar/editar Acordo etc.), fazendo a
+    // ordenação escolhida "se perder" após qualquer ação.
+    const movedItem = grupoReordenado.find((item) => item.id === movedId)!;
+    const novaOrdemGlobal = [...listaAnterior.taskNova, ...listaAnterior.taskComAcordo]
+      .filter((item) => item.id !== movedId)
+      .sort((a, b) => a.ordemExibicao - b.ordemExibicao);
+    novaOrdemGlobal.splice(novaPosicao, 0, movedItem);
+    const ordemPorId = new Map(novaOrdemGlobal.map((item, index) => [item.id, index]));
 
-      return listaOtimista;
+    function reatribuirOrdemExibicao<T extends ItemComOrdemExibicao>(itens: T[]): T[] {
+      return itens.map((item) => ({
+        ...item,
+        ordemExibicao: ordemPorId.get(item.id) ?? item.ordemExibicao,
+      }));
+    }
+
+    const listaOtimista: ListaDeAcordos = {
+      taskNova: reatribuirOrdemExibicao(
+        grupo === 'taskNova' ? (grupoReordenado as TaskNovaItem[]) : listaAnterior.taskNova,
+      ),
+      taskComAcordo: reatribuirOrdemExibicao(
+        grupo === 'taskComAcordo'
+          ? (grupoReordenado as TaskComAcordoItem[])
+          : listaAnterior.taskComAcordo,
+      ),
+    };
+
+    setLista(listaOtimista);
+
+    reordenarTask(movedId, novaPosicao).catch((error: unknown) => {
+      const mensagem =
+        error instanceof ApiError ? error.message : 'Não foi possível reordenar a Task.';
+      setMensagemErro(mensagem);
+      // Desfaz a reordenação otimista, restaurando o estado anterior.
+      setLista(listaAnterior);
     });
   }
 
@@ -274,7 +304,7 @@ export function ListaDeAcordosPage() {
               aria-labelledby="grupo-task-nova-titulo"
               data-testid="grupo-task-nova"
             >
-              <h2 id="grupo-task-nova-titulo">Task_Nova</h2>
+              <h2 id="grupo-task-nova-titulo">Task Nova</h2>
               <SortableTaskGroup
                 items={lista.taskNova}
                 onReorder={(oldIndex, newIndex, movedId) =>
@@ -302,7 +332,7 @@ export function ListaDeAcordosPage() {
               aria-labelledby="grupo-task-com-acordo-titulo"
               data-testid="grupo-task-com-acordo"
             >
-              <h2 id="grupo-task-com-acordo-titulo">Task_Com_Acordo</h2>
+              <h2 id="grupo-task-com-acordo-titulo">Task Com Acordo</h2>
               <SortableTaskGroup
                 items={lista.taskComAcordo}
                 onReorder={(oldIndex, newIndex, movedId) =>

@@ -1,0 +1,52 @@
+.motivo-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.motivo-modal {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 28rem;
+  width: 90%;
+  text-align: left;
+}
+
+.motivo-modal__titulo {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.motivo-modal__campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.motivo-modal__campo input {
+  padding: 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-alt);
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: 1em;
+}
+
+.motivo-modal__acoes {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.motivo-modal__erro {
+  color: var(--color-danger);
+  font-weight: 600;
+  margin: 1rem 0 0;
+}

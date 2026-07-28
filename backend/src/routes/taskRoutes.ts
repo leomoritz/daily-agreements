@@ -22,6 +22,7 @@
 import { Router } from 'express';
 
 import { acordoService } from '../services/acordoService.js';
+import type { MotivoInput } from '../services/acordoService.js';
 import { atividadesFinalizadasService } from '../services/atividadesFinalizadasService.js';
 import { cadastroEmLoteService } from '../services/cadastroEmLoteService.js';
 import { listaDeAcordosService } from '../services/listaDeAcordosService.js';
@@ -41,6 +42,22 @@ tasksRouter.get(
   asyncHandler(async (_req, res) => {
     const atividades = await atividadesFinalizadasService.obterAtividadesFinalizadas();
     res.status(200).json(atividades);
+  }),
+);
+
+// GET /tasks/nao-atualizados — returns the
+// Lista_de_Acordos_Nao_Atualizados view: active Tasks with no Acordo at
+// all, or whose most recent Acordo's data de registro is not on the
+// current calendar day, ordered by ordemExibicao ascending. Delegates to
+// ListaDeAcordosService.obterNaoAtualizados (Requirements 7.2, 7.3, 7.4,
+// 7.5, 7.6, 7.7, 7.10). Registered before `/:id`-shaped routes below so
+// Express matches this literal segment first, same as `/finalizadas`
+// above.
+tasksRouter.get(
+  '/nao-atualizados',
+  asyncHandler(async (_req, res) => {
+    const naoAtualizados = await listaDeAcordosService.obterNaoAtualizados();
+    res.status(200).json(naoAtualizados);
   }),
 );
 
@@ -101,9 +118,39 @@ tasksRouter.post(
   }),
 );
 
+/**
+ * Constrói um `MotivoInput` a partir de `motivoId`/`motivoNome` presentes
+ * no body de uma requisição, ou `undefined` quando nenhum dos dois foi
+ * informado — preservando o comportamento anterior (nenhum motivo) para
+ * requisições que não enviam esses campos (Requirement 10.6).
+ */
+function motivoInputFromBody(body: Record<string, unknown>): MotivoInput | undefined {
+  const motivoId = typeof body.motivoId === 'string' ? body.motivoId : undefined;
+  const motivoNome = typeof body.motivoNome === 'string' ? body.motivoNome : undefined;
+
+  if (motivoId === undefined && motivoNome === undefined) {
+    return undefined;
+  }
+
+  return { motivoId, motivoNome };
+}
+
 // POST /tasks/:id/acordos — registers a new Acordo (first or next) for
-// the Task. Delegates to AcordoService.registrarAcordo (Requirements
-// 2.1, 2.2, 2.4, 2.5, 5.1, 5.2, 5.4, 5.5, 5.6, 5.7, 5.8).
+// the Task, or, when the Task's Acordo_Atual is pendente and the caller
+// confirms `confirmaCumprimentoAcordoAtual`, evaluates that Acordo_Atual
+// as cumprido and registers the new Acordo atomically
+// (Registro_de_Acordo_com_Avaliacao). Delegates to
+// AcordoService.registrarAcordo (Requirements 2.1, 2.2, 2.4, 2.5, 5.1,
+// 5.2, 5.4, 5.5, 5.6, 5.7, 5.8, 8.2, 8.7, 8.11).
+//
+// `registrarAcordo` always creates a new Acordo with
+// `estadoCumprimento = 'pendente'` — except in the "Finalizar" case
+// (Requirement 8.7), where no new Acordo is registered and the Acordo
+// returned is the just-evaluated (now `cumprido`) Acordo_Atual instead.
+// That difference in `estadoCumprimento` is what distinguishes the two
+// cases here: a `pendente` result means a new Acordo was created (201,
+// the general/default case); anything else means the call only
+// evaluated the existing Acordo_Atual, with no new Acordo (200).
 tasksRouter.post(
   '/:id/acordos',
   asyncHandler(async (req, res) => {
@@ -118,19 +165,30 @@ tasksRouter.post(
 
     const responsavelId =
       typeof body.responsavelId === 'string' ? body.responsavelId : undefined;
+    const confirmaCumprimentoAcordoAtual =
+      typeof body.confirmaCumprimentoAcordoAtual === 'boolean'
+        ? body.confirmaCumprimentoAcordoAtual
+        : undefined;
 
     const acordo = await acordoService.registrarAcordo(
       req.params.id,
       body.tipoAcordoId,
       responsavelId,
+      { confirmaCumprimentoAcordoAtual },
     );
-    res.status(201).json(acordo);
+
+    res.status(acordo.estadoCumprimento === 'pendente' ? 201 : 200).json(acordo);
   }),
 );
 
 // PATCH /tasks/:id/acordos/atual — evaluates the Task's Acordo_Atual.
-// Delegates to AcordoService.avaliarAcordoAtual (Requirements 4.1, 4.2,
-// 4.3, 4.5, 4.6, 4.7, 4.8).
+// Accepts a motivo via `motivoId` (existing) and/or `motivoNome` (new,
+// Requirements 3.3, 3.4, 3.5, 3.8). For `resultado === 'nao_cumprido'`,
+// delegates to AcordoService.marcarNaoCumprido, which additionally
+// enforces that the Acordo_Atual is still `pendente` (Requirement
+// 3.11); for `resultado === 'cumprido'`, keeps delegating to
+// AcordoService.avaliarAcordoAtual (Requirements 4.1, 4.2, 4.3, 4.5,
+// 4.6, 4.7, 4.8).
 tasksRouter.patch(
   '/:id/acordos/atual',
   asyncHandler(async (req, res) => {
@@ -143,13 +201,13 @@ tasksRouter.patch(
       );
     }
 
-    const motivoId = typeof body.motivoId === 'string' ? body.motivoId : undefined;
+    const motivo = motivoInputFromBody(body);
 
-    const acordo = await acordoService.avaliarAcordoAtual(
-      req.params.id,
-      body.resultado,
-      motivoId,
-    );
+    const acordo =
+      body.resultado === 'nao_cumprido'
+        ? await acordoService.marcarNaoCumprido(req.params.id, motivo)
+        : await acordoService.avaliarAcordoAtual(req.params.id, body.resultado, motivo);
+
     res.status(200).json(acordo);
   }),
 );
@@ -157,15 +215,20 @@ tasksRouter.patch(
 // POST /tasks/:id/acordos/repetir — "Repetir último acordo": evaluates
 // the Task's Acordo_Atual (cumprido if its Tipo_de_Acordo is "Avaliar e
 // planejar", não cumprido otherwise) and registers a new Acordo of that
-// same Tipo_de_Acordo, keeping the current Responsável. Delegates to
-// AcordoService.repetirUltimoAcordo. Registered before `/:id/acordos`
-// would ever conflict — Express matches the more specific
-// `/:id/acordos/repetir` literal segment ahead of any param-only route,
-// so there is no ambiguity with `POST /:id/acordos`.
+// same Tipo_de_Acordo, keeping the current Responsável. Accepts an
+// optional `{ motivoId?, motivoNome? }` body, associated to the
+// evaluation of the Acordo_Atual being repeated (Requirements 4.2, 4.5).
+// Delegates to AcordoService.repetirUltimoAcordo. Registered before
+// `/:id/acordos` would ever conflict — Express matches the more
+// specific `/:id/acordos/repetir` literal segment ahead of any
+// param-only route, so there is no ambiguity with `POST /:id/acordos`.
 tasksRouter.post(
   '/:id/acordos/repetir',
   asyncHandler(async (req, res) => {
-    const acordo = await acordoService.repetirUltimoAcordo(req.params.id);
+    const body = req.body ?? {};
+    const motivo = motivoInputFromBody(body);
+
+    const acordo = await acordoService.repetirUltimoAcordo(req.params.id, motivo);
     res.status(201).json(acordo);
   }),
 );

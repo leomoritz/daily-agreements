@@ -303,5 +303,27 @@ describe('cadastro routes (GET/POST /tipos-de-acordo, /motivos-de-nao-cumpriment
       const list = await request(app).get('/usuarios');
       expect(list.body).toHaveLength(1);
     });
+
+    it('lists Usuário_Cadastrado in pt-BR alphabetical order, case/accent-insensitive (Requirements 6.1, 10.7)', async () => {
+      // Seeded out of order and with mixed case; naive ASCII/binary
+      // ordering would sort "1-teste" and accented names differently
+      // (e.g. "Água"/"Ávila" after "Zeca").
+      await request(app).post('/usuarios').send({ nomeLogin: 'Bruno' });
+      await request(app).post('/usuarios').send({ nomeLogin: 'ávila' });
+      await request(app).post('/usuarios').send({ nomeLogin: 'Alberto' });
+      await request(app).post('/usuarios').send({ nomeLogin: 'ÁGUA' });
+      await request(app).post('/usuarios').send({ nomeLogin: '1-teste' });
+
+      const list = await request(app).get('/usuarios');
+
+      expect(list.status).toBe(200);
+      expect(list.body.map((usuario: { nomeLogin: string }) => usuario.nomeLogin)).toEqual([
+        '1-teste',
+        'ÁGUA',
+        'Alberto',
+        'ávila',
+        'Bruno',
+      ]);
+    });
   });
 });

@@ -35,6 +35,7 @@ function criarTaskComAcordo(overrides: Partial<TaskComAcordoItem> = {}): TaskCom
     titulo: 'Enviar para review',
     ordemExibicao: 0,
     tipoAcordoNome: 'Enviar para review',
+    estadoCumprimentoAcordoAtual: 'pendente',
     dataRegistroAcordoAtual: '2024-05-10T10:00:00.000Z',
     alerta: false,
     numTentativas: 0,

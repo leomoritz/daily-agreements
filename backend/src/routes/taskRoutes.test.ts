@@ -160,6 +160,89 @@ describe('task routes (POST /tasks)', () => {
       expect(res.body.taskNova.map((t: { id: string }) => t.id)).toEqual([alvo.id]);
       expect(res.body.taskComAcordo).toEqual([]);
     });
+
+    it('returns responsavelId, estadoCumprimentoAcordoAtual and ultimoMotivoNome for taskComAcordo items (Requirements 8.1, 2.1)', async () => {
+      const usuario = await prisma.usuarioCadastrado.create({ data: { nomeLogin: 'joao.silva' } });
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const motivo = await prisma.motivoNaoCumprimento.create({ data: { nome: 'Motivo registrado' } });
+      const task = await prisma.task.create({
+        data: { titulo: 'Task com motivo', ordemExibicao: 0, responsavelId: usuario.id },
+      });
+      const acordoAnterior = await prisma.acordo.create({
+        data: {
+          taskId: task.id,
+          tipoAcordoId: tipoAcordo.id,
+          estadoCumprimento: 'nao_cumprido',
+          motivoNaoCumprimentoId: motivo.id,
+          dataRegistro: new Date('2024-01-01T00:00:00.000Z'),
+        },
+      });
+      const acordoAtual = await prisma.acordo.create({
+        data: {
+          taskId: task.id,
+          tipoAcordoId: tipoAcordo.id,
+          dataRegistro: new Date('2024-02-01T00:00:00.000Z'),
+        },
+      });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordoAtual.id } });
+
+      const res = await request(app).get('/tasks');
+
+      expect(res.status).toBe(200);
+      const item = res.body.taskComAcordo.find((t: { id: string }) => t.id === task.id);
+      expect(item).toMatchObject({
+        responsavelId: usuario.id,
+        estadoCumprimentoAcordoAtual: 'pendente',
+        ultimoMotivoNome: motivo.nome,
+      });
+      expect(acordoAnterior.motivoNaoCumprimentoId).toBe(motivo.id);
+    });
+  });
+
+  describe('GET /tasks/nao-atualizados', () => {
+    it('happy path: includes a Task_Nova (sem Acordo) and a Task whose último Acordo não é de hoje, omitting one atualizada hoje (Requirements 7.3, 7.4)', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+
+      const taskSemAcordo = await prisma.task.create({
+        data: { titulo: 'Task sem acordo', ordemExibicao: 0 },
+      });
+
+      const taskDesatualizada = await prisma.task.create({
+        data: { titulo: 'Task desatualizada', ordemExibicao: 1 },
+      });
+      const acordoAntigo = await prisma.acordo.create({
+        data: {
+          taskId: taskDesatualizada.id,
+          tipoAcordoId: tipoAcordo.id,
+          dataRegistro: new Date('2020-01-01T00:00:00.000Z'),
+        },
+      });
+      await prisma.task.update({
+        where: { id: taskDesatualizada.id },
+        data: { acordoAtualId: acordoAntigo.id },
+      });
+
+      const taskAtualizadaHoje = await prisma.task.create({
+        data: { titulo: 'Task atualizada hoje', ordemExibicao: 2 },
+      });
+      const acordoDeHoje = await prisma.acordo.create({
+        data: { taskId: taskAtualizadaHoje.id, tipoAcordoId: tipoAcordo.id, dataRegistro: new Date() },
+      });
+      await prisma.task.update({
+        where: { id: taskAtualizadaHoje.id },
+        data: { acordoAtualId: acordoDeHoje.id },
+      });
+
+      const res = await request(app).get('/tasks/nao-atualizados');
+
+      expect(res.status).toBe(200);
+      const ids = res.body.map((t: { id: string }) => t.id);
+      expect(ids).toEqual([taskSemAcordo.id, taskDesatualizada.id]);
+      expect(ids).not.toContain(taskAtualizadaHoje.id);
+
+      const itemSemAcordo = res.body.find((t: { id: string }) => t.id === taskSemAcordo.id);
+      expect(itemSemAcordo.dataUltimaAtualizacaoAcordo).toBeFalsy();
+    });
   });
 
   describe('GET /tasks/finalizadas', () => {
@@ -251,7 +334,7 @@ describe('task routes (POST /tasks)', () => {
       expect(res.body).toHaveProperty('erro.mensagem');
     });
 
-    it('rejects a second Acordo while the Acordo_Atual is still pendente with 409 (Requirement 5.5)', async () => {
+    it('rejects a second Acordo while the Acordo_Atual is still pendente with 400 CONFIRMACAO_CUMPRIMENTO_OBRIGATORIA (Requirement 8.11)', async () => {
       const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
       const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
 
@@ -260,9 +343,39 @@ describe('task routes (POST /tasks)', () => {
         .post(`/tasks/${task.id}/acordos`)
         .send({ tipoAcordoId: tipoAcordo.id });
 
-      expect(res.status).toBe(409);
-      expect(res.body).toHaveProperty('erro.codigo');
-      expect(res.body).toHaveProperty('erro.mensagem');
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({
+        erro: { codigo: 'CONFIRMACAO_CUMPRIMENTO_OBRIGATORIA' },
+      });
+      expect(res.body.erro.mensagem).toBeTruthy();
+    });
+
+    it('happy path: registers a new Acordo when confirmaCumprimentoAcordoAtual is true, evaluating the pendente Acordo_Atual as cumprido (Requirement 8.11)', async () => {
+      const tipoAtual = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const tipoNovo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para deploy' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
+
+      const primeiro = await request(app)
+        .post(`/tasks/${task.id}/acordos`)
+        .send({ tipoAcordoId: tipoAtual.id });
+
+      const res = await request(app)
+        .post(`/tasks/${task.id}/acordos`)
+        .send({ tipoAcordoId: tipoNovo.id, confirmaCumprimentoAcordoAtual: true });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        taskId: task.id,
+        tipoAcordoId: tipoNovo.id,
+        estadoCumprimento: 'pendente',
+      });
+      expect(res.body.id).not.toBe(primeiro.body.id);
+
+      const acordoAnterior = await prisma.acordo.findUnique({ where: { id: primeiro.body.id } });
+      expect(acordoAnterior?.estadoCumprimento).toBe('cumprido');
+
+      const taskAtualizada = await prisma.task.findUnique({ where: { id: task.id } });
+      expect(taskAtualizada?.acordoAtualId).toBe(res.body.id);
     });
   });
 
@@ -306,6 +419,65 @@ describe('task routes (POST /tasks)', () => {
       expect(res.status).toBe(409);
       expect(res.body).toHaveProperty('erro.codigo');
       expect(res.body).toHaveProperty('erro.mensagem');
+    });
+
+    it('happy path: creates a new Motivo_de_Nao_Cumprimento inline via motivoNome (Requirement 3.3)', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
+      const acordo = await prisma.acordo.create({ data: { taskId: task.id, tipoAcordoId: tipoAcordo.id } });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordo.id } });
+
+      const res = await request(app)
+        .patch(`/tasks/${task.id}/acordos/atual`)
+        .send({ resultado: 'nao_cumprido', motivoNome: 'Aguardando aprovação' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: acordo.id, estadoCumprimento: 'nao_cumprido' });
+
+      const motivos = await prisma.motivoNaoCumprimento.findMany();
+      expect(motivos).toHaveLength(1);
+      expect(motivos[0]?.nome).toBe('Aguardando aprovação');
+      expect(res.body.motivoNaoCumprimentoId).toBe(motivos[0]?.id);
+    });
+
+    it('happy path: matches an existing Motivo_de_Nao_Cumprimento case-insensitively via motivoNome, without creating a duplicate (Requirement 3.3)', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const motivoExistente = await prisma.motivoNaoCumprimento.create({
+        data: { nome: 'Aguardando aprovação' },
+      });
+      const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
+      const acordo = await prisma.acordo.create({ data: { taskId: task.id, tipoAcordoId: tipoAcordo.id } });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordo.id } });
+
+      const res = await request(app)
+        .patch(`/tasks/${task.id}/acordos/atual`)
+        .send({ resultado: 'nao_cumprido', motivoNome: 'AGUARDANDO APROVAÇÃO' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.motivoNaoCumprimentoId).toBe(motivoExistente.id);
+
+      const motivos = await prisma.motivoNaoCumprimento.findMany();
+      expect(motivos).toHaveLength(1);
+    });
+
+    it('rejects nao_cumprido on an Acordo_Atual do Tipo_de_Acordo "Avaliar e planejar" with 409 ACORDO_AVALIAR_PLANEJAR_NAO_CUMPRIMENTO_BLOQUEADO (Requirement 5.2)', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Avaliar e planejar' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
+      const acordo = await prisma.acordo.create({ data: { taskId: task.id, tipoAcordoId: tipoAcordo.id } });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordo.id } });
+
+      const res = await request(app)
+        .patch(`/tasks/${task.id}/acordos/atual`)
+        .send({ resultado: 'nao_cumprido' });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({
+        erro: { codigo: 'ACORDO_AVALIAR_PLANEJAR_NAO_CUMPRIMENTO_BLOQUEADO' },
+      });
+      expect(res.body.erro.mensagem).toBeTruthy();
+
+      const acordoInalterado = await prisma.acordo.findUnique({ where: { id: acordo.id } });
+      expect(acordoInalterado?.estadoCumprimento).toBe('pendente');
     });
   });
 
@@ -385,6 +557,49 @@ describe('task routes (POST /tasks)', () => {
       expect(res.status).toBe(409);
       expect(res.body).toHaveProperty('erro.codigo');
       expect(res.body).toHaveProperty('erro.mensagem');
+    });
+
+    it('associa o motivoNome informado ao Acordo anterior avaliado como não cumprido (Requirement 10.6)', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
+      const acordoAtual = await prisma.acordo.create({
+        data: { taskId: task.id, tipoAcordoId: tipoAcordo.id },
+      });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordoAtual.id } });
+
+      const res = await request(app)
+        .post(`/tasks/${task.id}/acordos/repetir`)
+        .send({ motivoNome: 'Dependência externa' });
+
+      expect(res.status).toBe(201);
+
+      const acordoAnterior = await prisma.acordo.findUnique({ where: { id: acordoAtual.id } });
+      expect(acordoAnterior?.estadoCumprimento).toBe('nao_cumprido');
+
+      const motivo = await prisma.motivoNaoCumprimento.findUnique({
+        where: { id: acordoAnterior?.motivoNaoCumprimentoId ?? '' },
+      });
+      expect(motivo?.nome).toBe('Dependência externa');
+    });
+
+    it('associa o motivoId informado ao Acordo anterior quando o Acordo_Atual é "Avaliar e planejar"', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Avaliar e planejar' } });
+      const motivo = await prisma.motivoNaoCumprimento.create({ data: { nome: 'Motivo existente' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task de teste', ordemExibicao: 0 } });
+      const acordoAtual = await prisma.acordo.create({
+        data: { taskId: task.id, tipoAcordoId: tipoAcordo.id },
+      });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordoAtual.id } });
+
+      const res = await request(app)
+        .post(`/tasks/${task.id}/acordos/repetir`)
+        .send({ motivoId: motivo.id });
+
+      expect(res.status).toBe(201);
+
+      const acordoAnterior = await prisma.acordo.findUnique({ where: { id: acordoAtual.id } });
+      expect(acordoAnterior?.estadoCumprimento).toBe('cumprido');
+      expect(acordoAnterior?.motivoNaoCumprimentoId).toBe(motivo.id);
     });
 
     it('mantém o indicador de alerta na Lista_de_Acordos já na primeira repetição de um Tipo_de_Acordo diferente de "Avaliar e planejar"', async () => {

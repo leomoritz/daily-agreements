@@ -34,7 +34,7 @@ type CadastroServiceRepository<TModel extends Record<string, unknown>, TCreateIn
 >;
 
 /** Options configuring a `CadastroService` instance for a specific cadastro. */
-export interface CadastroServiceOptions<TCreateInput> {
+export interface CadastroServiceOptions<TModel, TCreateInput> {
   /** Human-readable label used in error messages (e.g. "Tipo_de_Acordo"). */
   label: string;
   /** Builds the Prisma create-input from the trimmed value to add. */
@@ -48,6 +48,12 @@ export interface CadastroServiceOptions<TCreateInput> {
    * restriction (e.g. Cadastro_de_Usuários).
    */
   verificarEmUso?: (id: string) => Promise<boolean>;
+  /**
+   * Optional comparator applied in `listar()`. When absent, the order
+   * returned by the repository (database order) is preserved unchanged
+   * (Requirements 6.1, 6.2, 6.4, 6.5, 10.7).
+   */
+  comparar?: (a: TModel, b: TModel) => number;
 }
 
 export class CadastroService<TModel extends Record<string, unknown>, TCreateInput> {
@@ -56,24 +62,34 @@ export class CadastroService<TModel extends Record<string, unknown>, TCreateInpu
   private readonly buildCreateInput: (valor: string) => TCreateInput;
   private readonly maxLength: number;
   private readonly verificarEmUso?: (id: string) => Promise<boolean>;
+  private readonly comparar?: (a: TModel, b: TModel) => number;
 
   constructor(
     repository: CadastroServiceRepository<TModel, TCreateInput>,
-    options: CadastroServiceOptions<TCreateInput>,
+    options: CadastroServiceOptions<TModel, TCreateInput>,
   ) {
     this.repository = repository;
     this.label = options.label;
     this.buildCreateInput = options.buildCreateInput;
     this.maxLength = options.maxLength ?? VALOR_MAX_LENGTH;
     this.verificarEmUso = options.verificarEmUso;
+    this.comparar = options.comparar;
   }
 
   /**
    * Returns all registered values, including seeded and later-added ones
    * (Requirements 10.4, 11.4, 15.6).
+   *
+   * When a `comparar` comparator was configured, the result is sorted
+   * with it (Requirements 6.1, 6.2, 6.4). Otherwise the database order is
+   * preserved unchanged (Requirement 10.7).
    */
   async listar(): Promise<TModel[]> {
-    return this.repository.list();
+    const valores = await this.repository.list();
+    if (!this.comparar) {
+      return valores;
+    }
+    return [...valores].sort(this.comparar);
   }
 
   /**
@@ -161,8 +177,29 @@ export const motivoNaoCumprimentoService = new CadastroService(motivoNaoCumprime
   verificarEmUso: (id) => acordoRepository.existsByMotivoNaoCumprimentoId(id),
 });
 
+/**
+ * pt-BR, case/accent-insensitive collator used to sort Cadastro_de_Usuários
+ * (Requirements 6.1, 6.4). `usage: 'sort'` (the default for sorting) makes
+ * the intent explicit; `sensitivity: 'base'` ignores case and diacritics.
+ */
+const colatorPtBR = new Intl.Collator('pt-BR', { sensitivity: 'base', usage: 'sort' });
+
+/**
+ * Compares two Usuário_Cadastrado by `nomeLogin` using `colatorPtBR`,
+ * breaking ties deterministically by ascending `id` (Requirement 6.2).
+ *
+ * Exported so `cadastroService.test.ts` can exercise the exact
+ * production comparator against an in-memory fake repository (task
+ * 6.2's Property 19), without duplicating this logic in the test.
+ */
+export const compararUsuarios = (
+  a: { id: string; nomeLogin: string },
+  b: { id: string; nomeLogin: string },
+) => colatorPtBR.compare(a.nomeLogin, b.nomeLogin) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 export const usuarioCadastradoService = new CadastroService(usuarioCadastradoRepository, {
   label: 'Usuário',
   buildCreateInput: (nomeLogin) => ({ nomeLogin }),
   verificarEmUso: (id) => taskRepository.existsByResponsavelId(id),
+  comparar: compararUsuarios,
 });

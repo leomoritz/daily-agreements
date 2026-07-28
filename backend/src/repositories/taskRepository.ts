@@ -42,6 +42,36 @@ export type TaskWithAcordosEResponsavel = Prisma.TaskGetPayload<{
   };
 }>;
 
+/**
+ * A Task with its Acordo_Atual (and its Tipo_de_Acordo), its Responsável,
+ * and its most recent Acordo that carries a Motivo_de_Nao_Cumprimento
+ * (with that Motivo) eagerly loaded. Used by
+ * `ListaDeAcordosService.obterLista` to derive `ultimoMotivoNome`
+ * (Requirements 2.1, 2.3) without per-Task follow-up queries.
+ */
+export type TaskWithAcordoAtualResponsavelEUltimoMotivo = Prisma.TaskGetPayload<{
+  include: {
+    acordoAtual: { include: { tipoAcordo: true } };
+    responsavel: true;
+    acordos: { include: { motivoNaoCumprimento: true } };
+  };
+}>;
+
+/**
+ * A Task with its Acordo_Atual (and its Tipo_de_Acordo), its Responsável,
+ * and its single most recent Acordo (regardless of motivo) eagerly
+ * loaded. Used by `ListaDeAcordosService.obterNaoAtualizados` to derive
+ * `dataUltimaAtualizacaoAcordo` (Requirement 7.3) without per-Task
+ * follow-up queries.
+ */
+export type TaskWithUltimoAcordoEResponsavel = Prisma.TaskGetPayload<{
+  include: {
+    acordoAtual: { include: { tipoAcordo: true } };
+    responsavel: true;
+    acordos: true;
+  };
+}>;
+
 /** Fields accepted when creating a Task. */
 export interface TaskCreateData {
   titulo: string;
@@ -126,6 +156,54 @@ export class TaskRepository {
       include: {
         acordoAtual: { include: { tipoAcordo: true } },
         responsavel: true,
+      },
+    });
+  }
+
+  /**
+   * Lists active Tasks (not concluída — Requirement 6.2), eagerly loading
+   * each Task's Acordo_Atual (with its Tipo_de_Acordo), Responsável, and
+   * its most recent Acordo that carries a Motivo_de_Nao_Cumprimento (with
+   * that Motivo). Used by `ListaDeAcordosService.obterLista` (Requirements
+   * 2.1, 2.3) to derive `ultimoMotivoNome` without per-Task follow-up
+   * queries.
+   */
+  async listActiveWithAcordoAtualResponsavelEUltimoMotivo(): Promise<
+    TaskWithAcordoAtualResponsavelEUltimoMotivo[]
+  > {
+    return this.prisma.task.findMany({
+      where: { concluida: false },
+      include: {
+        acordoAtual: { include: { tipoAcordo: true } },
+        responsavel: true,
+        acordos: {
+          where: { motivoNaoCumprimentoId: { not: null } },
+          include: { motivoNaoCumprimento: true },
+          orderBy: [{ dataRegistro: 'desc' }, { id: 'desc' }],
+          take: 1,
+        },
+      },
+    });
+  }
+
+  /**
+   * Lists active Tasks (not concluída — Requirement 6.2), eagerly loading
+   * each Task's Acordo_Atual (with its Tipo_de_Acordo), Responsável, and
+   * its single most recent Acordo (regardless of motivo). Used by
+   * `ListaDeAcordosService.obterNaoAtualizados` (Requirement 7.3) to
+   * derive `dataUltimaAtualizacaoAcordo` without per-Task follow-up
+   * queries.
+   */
+  async listActiveWithUltimoAcordoEResponsavel(): Promise<TaskWithUltimoAcordoEResponsavel[]> {
+    return this.prisma.task.findMany({
+      where: { concluida: false },
+      include: {
+        acordoAtual: { include: { tipoAcordo: true } },
+        responsavel: true,
+        acordos: {
+          orderBy: [{ dataRegistro: 'desc' }, { id: 'desc' }],
+          take: 1,
+        },
       },
     });
   }
