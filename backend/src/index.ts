@@ -14,9 +14,7 @@ const app = express();
 app.use(
   cors({
     origin: [
-      'http://localhost:8081',
-      'http://vwt001appdhc003:8081'
-    ]
+      'http://localhost:8081',    ]
    })
 );
 
