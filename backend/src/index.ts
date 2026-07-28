@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 
 import { errorHandler } from './middleware/errorHandler.js';
 import {
@@ -9,6 +10,16 @@ import {
 import { tasksRouter } from './routes/taskRoutes.js';
 
 const app = express();
+
+app.use(
+  cors({
+    origin: [
+      'http://localhost:8081',
+      'http://vwt001appdhc003:8081'
+    ]
+   })
+);
+
 app.use(express.json());
 
 const PORT = process.env.PORT ?? 3001;
