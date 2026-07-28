@@ -11,10 +11,14 @@ import { tasksRouter } from './routes/taskRoutes.js';
 
 const app = express();
 
+const server = process.env.SERVER as string;
+
 app.use(
   cors({
     origin: [
-      'http://localhost:8081',    ]
+      'http://localhost:8081',    
+      server
+    ]
    })
 );
 
