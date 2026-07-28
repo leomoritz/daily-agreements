@@ -2,6 +2,7 @@
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 1rem;
+  width: 100%;
   margin-bottom: 0.75rem;
   text-align: left;
   background-color: var(--color-surface);
@@ -24,7 +25,9 @@
 
 .task-card__responsavel,
 .task-card__tipo-acordo,
-.task-card__data-registro {
+.task-card__data-registro,
+.task-card__num-tentativas,
+.task-card__ultimo-motivo {
   margin: 0.25rem 0;
 }
 

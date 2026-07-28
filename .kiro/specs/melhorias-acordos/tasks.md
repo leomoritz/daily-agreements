@@ -210,7 +210,7 @@ As tarefas de ajuste dos testes já existentes (tabela "Prevenção de regressõ
     - _Requirements: 3.1, 3.7, 3.9, 3.10, 4.7, 4.10_
 
 - [ ] 11. Reformular o `TaskCard`
-  - [ ] 11.1 Alterar `frontend/src/components/TaskCard.tsx` (e `TaskCard.css` quando necessário)
+  - [x] 11.1 Alterar `frontend/src/components/TaskCard.tsx` (e `TaskCard.css` quando necessário)
     - Exibir, na ordem: "Registrado em" → "Nº de tentativas" (`numTentativas`, sempre, inclusive zero, só para Task_Com_Acordo) → "Último motivo informado" (`ultimoMotivoNome`, com rótulo omitido quando ausente)
     - Textos de alerta sem contador: "Alerta: Acordo não cumprido" e "Alerta: número de tentativas de 'Avaliar e planejar' alto"
     - Remover o botão "Avaliar" e o uso do `AvaliarAcordoForm`; adicionar a ação "Marcar como não cumprido" abrindo o `MotivoModal` e submetendo `PATCH /tasks/:id/acordos/atual` com `resultado: 'nao_cumprido'` e `motivoNome`
@@ -265,7 +265,7 @@ As tarefas de ajuste dos testes já existentes (tabela "Prevenção de regressõ
     - _Requirements: 6.8, 8.5, 8.11, 9.9, 10.4_
 
 - [ ] 13. Implementar a aba "Acordos Não Atualizados" e integrar a lista
-  - [ ] 13.1 Criar `frontend/src/pages/AcordosNaoAtualizadosPage.tsx` e `AcordosNaoAtualizadosPage.css`
+  - [x] 13.1 Criar `frontend/src/pages/AcordosNaoAtualizadosPage.tsx` e `AcordosNaoAtualizadosPage.css`
     - Consumir `obterAcordosNaoAtualizados()` com indicação de carregamento; em falha ou timeout de 3 s, encerrar o carregamento, exibir erro e oferecer "Tentar novamente"
     - Cada item exibe título, Responsável (quando houver), data em dd/mm/aaaa (quando houver) e Tipo_de_Acordo do Acordo_Atual (quando houver); Tasks sem Acordo exibem "Sem Acordo registrado" no lugar da data e do tipo
     - Lista vazia exibe "Todas as Tasks ativas possuem Acordo registrado hoje" e nenhum item; os dados são recarregados a cada montagem da página, como em `AtividadesFinalizadasPage`

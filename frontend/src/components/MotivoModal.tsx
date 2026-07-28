@@ -71,7 +71,7 @@ export function MotivoModal({ titulo, onConfirmar, onCancelar }: MotivoModalProp
   }, []);
 
   // Foco inicial no Combobox_de_Motivo (Requisito 3.1, design.md).
-  useEffect(() => {
+  useEffect(() => {    
     inputRef.current?.focus();
   }, []);
 
@@ -130,6 +130,7 @@ export function MotivoModal({ titulo, onConfirmar, onCancelar }: MotivoModalProp
             id={datalistId}
             type="text"
             list={`${datalistId}-lista`}
+            placeholder="Digite ou selecione um motivo"
             value={motivoNome}
             onChange={(event) => setMotivoNome(event.target.value)}
             disabled={enviando}

@@ -3,87 +3,85 @@
 // `taskComAcordo[]` retornado por `GET /tasks` (ver src/api/types.ts) e
 // renderiza os campos aplicáveis a cada grupo.
 //
-// Requisito 3.1: para Task_Com_Acordo, exibe título, Tipo_de_Acordo, data
-// de registro do Acordo_Atual e Responsável (quando houver).
-// Requisito 3.3: para Task_Nova, exibe título e Responsável (quando houver).
-// Requisito 3.6: quando o Acordo_Atual estiver não cumprido (`alerta`),
-// exibe um indicador visual de alerta (fundo vermelho) e o Nº_Tentativas —
-// sem depender apenas da cor, um texto/aria-label também comunica o alerta.
+// Requisito 3.1 (spec base) / 1.1, 1.2, 1.7, 2.1, 2.2, 2.7: para
+// Task_Com_Acordo, exibe título, Tipo_de_Acordo, Responsável (quando
+// houver) e, na ordem exigida, "Registrado em" → Campo_Numero_de_Tentativas
+// (sempre, inclusive zero) → Campo_Ultimo_Motivo (omitido, com o rótulo,
+// quando a Task não possui Ultimo_Motivo_Informado). Requisito 3.3 (spec
+// base): para Task_Nova, exibe título e Responsável (quando houver), sem
+// Campo_Numero_de_Tentativas nem Campo_Ultimo_Motivo.
+// Requisito 1.4, 1.5, 1.6: os textos de alerta ("Alerta: Acordo não
+// cumprido" e "Alerta: número de tentativas de 'Avaliar e planejar'
+// alto") não contêm nenhum contador — o Campo_Numero_de_Tentativas é a
+// única origem do valor do Nº_Tentativas.
 //
-// Requisito 9.1/9.2/9.6/9.7 (edição de título/Responsável, tarefa 27.1):
-// quando `onTaskEditada` é informado, um botão "Editar" alterna o card
-// para um modo de edição com um campo de texto (título) e um select de
+// Requisito 9.1/9.2/9.6/9.7 (edição de título/Responsável): quando
+// `onTaskEditada` é informado, um botão "Editar" alterna o card para um
+// modo de edição com um campo de texto (título) e um select de
 // Responsável (carregado via `listarUsuarios()`), submetendo para
-// `PATCH /tasks/:id`. Erros de validação (Requisito 9.2 — título vazio;
-// 9.7 — Responsável inválido) são exibidos dentro do próprio formulário
-// de edição sem descartar o que o usuário digitou/selecionou, permitindo
-// corrigir e tentar novamente.
-//
-// Nota de design: os itens de `taskNova[]`/`taskComAcordo[]` só trazem
-// `responsavelNome` (não `responsavelId`) — a lista de Tasks foi
-// desenhada para exibição, não para edição. Por isso, ao entrar em modo
-// de edição, o Responsável atual é pré-selecionado comparando
-// `responsavelNome` com o `nomeLogin` dos Usuários cadastrados
-// (correspondência exata); se nenhum Usuário corresponder (ex.: nome
-// alterado/removido do cadastro), o campo simplesmente inicia sem
-// seleção, deixando o usuário escolher livremente. Pelo mesmo motivo, o
+// `PATCH /tasks/:id`. O Responsável atual é pré-selecionado pelo
+// `responsavelId` do item (Requisito 9.6) — não mais por correspondência
+// de `responsavelNome` com `nomeLogin` — deixando o campo sem seleção
+// quando esse id não pertence ao Cadastro_de_Usuários. Erros de
+// validação (título vazio, Responsável inválido) são exibidos dentro do
+// próprio formulário de edição sem descartar o que o usuário
+// digitou/selecionou, permitindo corrigir e tentar novamente. O
 // resultado da edição é comunicado ao chamador (`onTaskEditada`) como
-// `{ titulo, responsavelNome }` — já resolvido a partir do Usuário
-// selecionado — em vez da `Task` crua retornada pela API (que só tem
-// `responsavelId`), permitindo que a página atualize o item exibido sem
-// precisar refazer essa resolução.
+// `{ titulo, responsavelNome }`, já resolvido a partir do Usuário
+// selecionado.
 //
 // Requisito 9.4/9.5 (remoção manual): o botão "Remover" exige uma
-// confirmação explícita (Requisito de segurança geral, não específico da
-// tarefa) antes de chamar `DELETE /tasks/:id`; erros são exibidos inline.
+// confirmação explícita antes de chamar `DELETE /tasks/:id`; erros são
+// exibidos inline.
 //
-// Wiring final do frontend (tarefa 28.1): quando `onAcordoAlterado` é
-// informado, o card ganha ações adicionais para conectar os formulários
-// de Acordo e o modal de histórico (implementados nas tarefas 23/24, mas
-// ainda não conectados à página principal):
-// - "Registrar Acordo": abre `RegistrarAcordoForm` inline. Exibida para
-//   toda Task — tanto para Task_Nova (primeiro Acordo, Requisitos 2.1,
-//   2.2) quanto para Task_Com_Acordo (próximo Acordo, Requisitos 5.1,
-//   5.2, 5.6, 5.7, 5.8).
-// - "Avaliar": abre `AvaliarAcordoForm` inline. Exibida somente para
-//   Task_Com_Acordo (Requisitos 4.1, 4.2, 4.5, 4.6, 4.7).
-// - "Repetir último acordo": chama diretamente
-//   `POST /tasks/:id/acordos/repetir` (sem painel/formulário, já que não
-//   há campos a coletar — o backend deriva Tipo_de_Acordo e Responsável a
-//   partir do Acordo_Atual). Exibida somente para Task_Com_Acordo. Se o
-//   Acordo_Atual for "Avaliar e planejar", o backend o marca cumprido e
-//   registra outro "Avaliar e planejar"; para qualquer outro
-//   Tipo_de_Acordo, o backend o marca não cumprido e registra um novo
-//   Acordo do mesmo tipo — em ambos os casos mantendo o Responsável atual.
-// - "Ver histórico": abre `TaskHistoricoModal` (Requisito 7). Exibida
-//   para toda Task, independente de `onAcordoAlterado` — o modal é
-//   somente leitura e não precisa disparar um refresh da lista.
+// Ações do card, quando `onAcordoAlterado` é informado:
+// - "Registrar Acordo": abre `RegistrarAcordoForm` inline, recebendo
+//   `estadoCumprimentoAcordoAtual` e `responsavelIdAtual` do item
+//   (Requisitos 8.1–8.4, 9.1, 9.4, 9.6, 9.7). Exibida para toda Task.
+// - "Marcar como não cumprido" (Acao_Marcar_Nao_Cumprido, Requisito 3):
+//   abre o `MotivoModal` e, ao confirmar, submete
+//   `PATCH /tasks/:id/acordos/atual` com `resultado: 'nao_cumprido'` e o
+//   `motivoNome` informado. Exibida somente para Task_Com_Acordo,
+//   permanecendo visível porém desabilitada (`disabled` + `aria-disabled`
+//   + `title`) quando `tipoAcordoNome === 'Avaliar e planejar'`
+//   (Requisitos 5.1, 5.4, 5.6) — nesse caso nenhum clique abre o modal ou
+//   dispara requisição. O botão "Avaliar" (e o `AvaliarAcordoForm`) não
+//   existe mais (Requisito 8.6): a avaliação de cumprimento passa a
+//   ocorrer via Registro_de_Acordo_com_Avaliacao, "Repetir último
+//   acordo", "Finalizar" ou esta ação.
+// - "Repetir último acordo" (Acao_Repetir_Ultimo_Acordo, Requisito 4):
+//   decide localmente se abre o `MotivoModal` — abre quando
+//   `tipoAcordoNome !== 'Avaliar e planejar'` ou quando
+//   `tentativasAvaliarPlanejar >= 2` (Requisitos 4.1, 4.3, 4.4); caso
+//   contrário chama `POST /tasks/:id/acordos/repetir` diretamente, sem
+//   modal. Exibida somente para Task_Com_Acordo.
+// - "Ver histórico": abre `TaskHistoricoModal` (Requisito 7 da spec
+//   base). Exibida para toda Task, independente de `onAcordoAlterado`.
 // - "Finalizar": chama diretamente `POST /tasks/:id/finalizar`. Exibida
-//   somente para Task_Com_Acordo (Task_Nova não possui Acordo_Atual para
-//   marcar como cumprido). O backend marca o Acordo_Atual como cumprido e
-//   finaliza a atividade (`Task.concluida = true`) num único passo,
-//   independentemente do Tipo_de_Acordo do Acordo_Atual.
+//   somente para Task_Com_Acordo.
 //
-// Nota de design: o item da lista não expõe se o Acordo_Atual de uma
-// Task_Com_Acordo está pendente ou já avaliado (só expõe `alerta` e
-// `numTentativas`) — por isso "Avaliar" e "Registrar Acordo" ficam
-// ambas visíveis para toda Task_Com_Acordo, e a validação de qual delas
-// pode realmente ser concluída no momento é delegada à API (que já
-// retorna um erro claro quando a ação não é aplicável ao estado atual:
-// Requisitos 2.5/5.5 para registrar com Acordo_Atual pendente, 4.8 para
-// avaliar sem Acordo_Atual).
-//
-// Após um registro/avaliação aceito pela API, o painel correspondente é
-// fechado e `onAcordoAlterado` é chamado para que a página recarregue a
-// lista completa do servidor (mais simples e correto do que tentar
-// reclassificar/atualizar o item localmente, já que o backend já calcula
-// isso em `ListaDeAcordosService`).
+// Requisito 3.10/4.10/10.11: um único estado `operacaoEmAndamento`
+// desabilita todas as ações de Acordo do card (Registrar Acordo, Marcar
+// como não cumprido, Repetir último acordo, Finalizar) enquanto qualquer
+// uma dessas operações está pendente, garantindo no máximo uma submissão
+// por vez. Após sucesso, o painel/modal correspondente é fechado e
+// `onAcordoAlterado` é chamado para que a página recarregue a lista
+// completa do servidor (Requisitos 3.3, 4.11, 8.8, 10.3) — mais simples e
+// correto do que reclassificar/atualizar o item localmente, já que o
+// backend já calcula tudo isso em `ListaDeAcordosService`.
 
 import { useState, type FormEvent } from 'react';
-import { editarTask, finalizarTask, listarUsuarios, removerTask, repetirUltimoAcordo } from '../api/client';
+import {
+  avaliarAcordoAtual,
+  editarTask,
+  finalizarTask,
+  listarUsuarios,
+  removerTask,
+  repetirUltimoAcordo,
+} from '../api/client';
 import { ApiError } from '../api/errors';
 import type { TaskComAcordoItem, TaskNovaItem, UsuarioCadastrado } from '../api/types';
-import { AvaliarAcordoForm } from './AvaliarAcordoForm';
+import { MotivoModal } from './MotivoModal';
 import { RegistrarAcordoForm } from './RegistrarAcordoForm';
 import { TaskHistoricoModal } from './TaskHistoricoModal';
 import './TaskCard.css';
@@ -102,15 +100,19 @@ export interface TaskCardProps {
   /** Chamado após a remoção ser aceita pela API (Requisito 9.4, 9.5). */
   onTaskRemovida?: (taskId: string) => void;
   /**
-   * Chamado após um registro ou avaliação de Acordo ser aceito pela API
-   * (tarefa 28.1). Quando informado, o card exibe as ações "Registrar
-   * Acordo" e (para Task_Com_Acordo) "Avaliar".
+   * Chamado após um registro, avaliação ou repetição de Acordo ser
+   * aceito pela API. Quando informado, o card exibe as ações "Registrar
+   * Acordo" e, para Task_Com_Acordo, "Marcar como não cumprido",
+   * "Repetir último acordo" e "Finalizar".
    */
   onAcordoAlterado?: () => void;
 }
 
 type StatusUsuarios = 'carregando' | 'sucesso' | 'erro';
-type PainelAberto = 'nenhum' | 'registrar-acordo' | 'avaliar-acordo';
+type PainelAberto = 'nenhum' | 'registrar-acordo';
+type ModalAberto = 'nenhum' | 'marcar-nao-cumprido' | 'repetir-ultimo-acordo';
+
+const TIPO_ACORDO_AVALIAR_PLANEJAR = 'Avaliar e planejar';
 
 /** Type guard: distingue um item de Task_Com_Acordo de um item de Task_Nova. */
 function isTaskComAcordoItem(
@@ -153,31 +155,68 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
   const [erroRemocao, setErroRemocao] = useState<string | null>(null);
 
   const [painelAberto, setPainelAberto] = useState<PainelAberto>('nenhum');
+  const [modalAberto, setModalAberto] = useState<ModalAberto>('nenhum');
   const [historicoAberto, setHistoricoAberto] = useState(false);
 
-  const [repetindo, setRepetindo] = useState(false);
+  // Requisitos 3.10, 4.10, 10.11: um único estado desabilita todas as
+  // ações de Acordo do card enquanto qualquer uma delas está pendente,
+  // garantindo no máximo uma submissão por vez. Cada ação mantém sua
+  // própria mensagem de erro.
+  const [operacaoEmAndamento, setOperacaoEmAndamento] = useState(false);
   const [erroRepetir, setErroRepetir] = useState<string | null>(null);
-
-  const [finalizando, setFinalizando] = useState(false);
   const [erroFinalizar, setErroFinalizar] = useState<string | null>(null);
+
+  const tipoAcordoAtual = comAcordo ? item.tipoAcordoNome : undefined;
+  const acaoMarcarNaoCumpridoDesabilitada = tipoAcordoAtual === TIPO_ACORDO_AVALIAR_PLANEJAR;
 
   function handleRegistrado() {
     setPainelAberto('nenhum');
     onAcordoAlterado?.();
   }
 
-  function handleAvaliado() {
-    setPainelAberto('nenhum');
-    onAcordoAlterado?.();
+  function handleAbrirMarcarNaoCumprido() {
+    if (operacaoEmAndamento || acaoMarcarNaoCumpridoDesabilitada) {
+      return;
+    }
+    setModalAberto('marcar-nao-cumprido');
+  }
+
+  async function handleConfirmarMarcarNaoCumprido(motivoNome: string) {
+    setOperacaoEmAndamento(true);
+    try {
+      await avaliarAcordoAtual(item.id, {
+        resultado: 'nao_cumprido',
+        ...(motivoNome ? { motivoNome } : {}),
+      });
+      setModalAberto('nenhum');
+      onAcordoAlterado?.();
+    } finally {
+      setOperacaoEmAndamento(false);
+    }
   }
 
   function handleRepetirUltimoAcordo() {
-    if (repetindo) {
+    if (operacaoEmAndamento) {
+      return;
+    }
+
+    // Requisitos 4.1, 4.3, 4.4: abre o Modal_de_Motivo quando o
+    // Tipo_de_Acordo do Acordo_Atual é diferente de "Avaliar e
+    // planejar", ou quando é "Avaliar e planejar" com
+    // `tentativasAvaliarPlanejar >= 2` (3ª repetição consecutiva ou
+    // posterior); nos demais casos, chama a API diretamente.
+    const exigeModal =
+    comAcordo &&
+      (item.tipoAcordoNome !== TIPO_ACORDO_AVALIAR_PLANEJAR || item.tentativasAvaliarPlanejar >= 2);
+
+    if (exigeModal) {
+      setErroRepetir(null);
+      setModalAberto('repetir-ultimo-acordo');
       return;
     }
 
     setErroRepetir(null);
-    setRepetindo(true);
+    setOperacaoEmAndamento(true);
 
     repetirUltimoAcordo(item.id)
       .then(() => {
@@ -189,17 +228,32 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
         setErroRepetir(mensagem);
       })
       .finally(() => {
-        setRepetindo(false);
+        setOperacaoEmAndamento(false);
       });
   }
 
+  async function handleConfirmarRepetirUltimoAcordo(motivoNome: string) {
+    setOperacaoEmAndamento(true);
+    try {
+      await repetirUltimoAcordo(item.id, motivoNome ? { motivoNome } : undefined);
+      setModalAberto('nenhum');
+      onAcordoAlterado?.();
+    } finally {
+      setOperacaoEmAndamento(false);
+    }
+  }
+
+  function handleCancelarModal() {
+    setModalAberto('nenhum');
+  }
+
   function handleFinalizar() {
-    if (finalizando) {
+    if (operacaoEmAndamento) {
       return;
     }
 
     setErroFinalizar(null);
-    setFinalizando(true);
+    setOperacaoEmAndamento(true);
 
     finalizarTask(item.id)
       .then(() => {
@@ -211,7 +265,7 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
         setErroFinalizar(mensagem);
       })
       .finally(() => {
-        setFinalizando(false);
+        setOperacaoEmAndamento(false);
       });
   }
 
@@ -224,12 +278,13 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
     listarUsuarios()
       .then((resultado) => {
         setUsuarios(resultado);
-        // Nota de design: o item da lista só traz `responsavelNome`, não
-        // `responsavelId` — resolve-se o Usuário atual comparando o nome
-        // exibido com o `nomeLogin` cadastrado. Sem correspondência, o
-        // select inicia sem seleção ("Nenhum").
-        const usuarioAtual = item.responsavelNome
-          ? resultado.find((usuario) => usuario.nomeLogin === item.responsavelNome)
+        // Requisito 9.6: o Responsável atual é pré-selecionado pelo
+        // `responsavelId` do item — não mais por correspondência de
+        // `responsavelNome` com `nomeLogin`. Sem correspondência (id
+        // ausente ou não pertencente ao Cadastro_de_Usuários), o select
+        // inicia sem seleção ("Nenhum").
+        const usuarioAtual = item.responsavelId
+          ? resultado.find((usuario) => usuario.id === item.responsavelId)
           : undefined;
         setResponsavelId(usuarioAtual?.id ?? '');
         setStatusUsuarios('sucesso');
@@ -410,17 +465,29 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
           <p className="task-card__tipo-acordo">
             <span className="task-card__label">Tipo de Acordo:</span> {item.tipoAcordoNome}
           </p>
+          {/* Ordem exigida pelos Requisitos 1.1, 1.2, 1.7, 2.1, 2.2, 2.7:
+              "Registrado em" → Nº de tentativas (sempre) → Último motivo
+              informado (omitido, com o rótulo, quando ausente). */}
           <p className="task-card__data-registro">
             <span className="task-card__label">Registrado em:</span>{' '}
             {formatarDataRegistro(item.dataRegistroAcordoAtual)}
           </p>
+          <p className="task-card__num-tentativas" data-testid="task-card-num-tentativas">
+            <span className="task-card__label">Nº de tentativas:</span> {item.numTentativas}
+          </p>
+          {item.ultimoMotivoNome && (
+            <p className="task-card__ultimo-motivo" data-testid="task-card-ultimo-motivo">
+              <span className="task-card__label">Último motivo informado:</span>{' '}
+              {item.ultimoMotivoNome}
+            </p>
+          )}
 
           {emAlerta && (
             <p className="task-card__alerta" role="status">
               <span className="task-card__alerta-badge" aria-hidden="true">
                 ⚠
               </span>{' '}
-              Alerta: Acordo não cumprido — Nº de tentativas: {item.numTentativas}
+              Alerta: Acordo não cumprido
             </p>
           )}
 
@@ -429,8 +496,7 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
               <span className="task-card__alerta-badge" aria-hidden="true">
                 ⚠
               </span>{' '}
-              Alerta: número de tentativas de "Avaliar e planejar" alto — Nº de tentativas:{' '}
-              {item.tentativasAvaliarPlanejar}
+              Alerta: número de tentativas de "Avaliar e planejar" alto
             </p>
           )}
         </>
@@ -450,42 +516,46 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
                 atual === 'registrar-acordo' ? 'nenhum' : 'registrar-acordo',
               )
             }
+            disabled={operacaoEmAndamento}
             data-testid="task-card-registrar-acordo"
           >
-            Registrar Acordo
+            Registrar acordo
           </button>
         )}
         {onAcordoAlterado && comAcordo && (
           <button
             type="button"
-            onClick={() =>
-              setPainelAberto((atual) =>
-                atual === 'avaliar-acordo' ? 'nenhum' : 'avaliar-acordo',
-              )
+            onClick={handleAbrirMarcarNaoCumprido}
+            disabled={operacaoEmAndamento || acaoMarcarNaoCumpridoDesabilitada}
+            aria-disabled={acaoMarcarNaoCumpridoDesabilitada}
+            title={
+              acaoMarcarNaoCumpridoDesabilitada
+                ? 'Acordos de "Avaliar e planejar" são avaliados apenas por repetição ou finalização.'
+                : undefined
             }
-            data-testid="task-card-avaliar-acordo"
+            data-testid="task-card-marcar-nao-cumprido"
           >
-            Avaliar
+            Registrar não cumprido
           </button>
         )}
         {onAcordoAlterado && comAcordo && (
           <button
             type="button"
             onClick={handleRepetirUltimoAcordo}
-            disabled={repetindo}
+            disabled={operacaoEmAndamento}
             data-testid="task-card-repetir-ultimo-acordo"
           >
-            {repetindo ? 'Repetindo...' : 'Repetir último acordo'}
+            {operacaoEmAndamento ? 'Processando...' : 'Repetir último acordo'}
           </button>
         )}
         {onAcordoAlterado && comAcordo && (
           <button
             type="button"
             onClick={handleFinalizar}
-            disabled={finalizando}
+            disabled={operacaoEmAndamento}
             data-testid="task-card-finalizar"
           >
-            {finalizando ? 'Finalizando...' : 'Finalizar'}
+            {operacaoEmAndamento ? 'Processando...' : 'Finalizar'}
           </button>
         )}
         {onTaskRemovida && !confirmandoRemocao && (
@@ -539,13 +609,13 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
 
       {painelAberto === 'registrar-acordo' && (
         <div className="task-card__painel-acordo" data-testid="task-card-painel-registrar-acordo">
-          <RegistrarAcordoForm taskId={item.id} onRegistrado={handleRegistrado} />
-        </div>
-      )}
-
-      {painelAberto === 'avaliar-acordo' && comAcordo && (
-        <div className="task-card__painel-acordo" data-testid="task-card-painel-avaliar-acordo">
-          <AvaliarAcordoForm taskId={item.id} onAvaliado={handleAvaliado} />
+          <RegistrarAcordoForm
+            taskId={item.id}
+            comAcordo={comAcordo}
+            estadoCumprimentoAcordoAtual={comAcordo ? item.estadoCumprimentoAcordoAtual : undefined}
+            responsavelIdAtual={item.responsavelId}
+            onRegistrado={handleRegistrado}
+          />
         </div>
       )}
 
@@ -572,6 +642,22 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
           taskId={item.id}
           taskTitulo={item.titulo}
           onClose={() => setHistoricoAberto(false)}
+        />
+      )}
+
+      {modalAberto === 'marcar-nao-cumprido' && (
+        <MotivoModal
+          titulo="Marcar como não cumprido"
+          onConfirmar={handleConfirmarMarcarNaoCumprido}
+          onCancelar={handleCancelarModal}
+        />
+      )}
+
+      {modalAberto === 'repetir-ultimo-acordo' && (
+        <MotivoModal
+          titulo="Repetir último acordo"
+          onConfirmar={handleConfirmarRepetirUltimoAcordo}
+          onCancelar={handleCancelarModal}
         />
       )}
     </article>
