@@ -91,13 +91,6 @@
   border-top: 1px solid var(--color-border);
 }
 
-.task-card__confirmar-remocao {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-}
-
 .task-card__editar-form {
   display: flex;
   flex-direction: column;

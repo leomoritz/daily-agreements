@@ -81,6 +81,7 @@ import {
 } from '../api/client';
 import { ApiError } from '../api/errors';
 import type { TaskComAcordoItem, TaskNovaItem, UsuarioCadastrado } from '../api/types';
+import { ConfirmacaoModal } from './ConfirmacaoModal';
 import { MotivoModal } from './MotivoModal';
 import { RegistrarAcordoForm } from './RegistrarAcordoForm';
 import { TaskHistoricoModal } from './TaskHistoricoModal';
@@ -558,31 +559,10 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
             {operacaoEmAndamento ? 'Processando...' : 'Finalizar'}
           </button>
         )}
-        {onTaskRemovida && !confirmandoRemocao && (
+        {onTaskRemovida && (
           <button type="button" onClick={iniciarRemocao} data-testid="task-card-remover">
             Remover
           </button>
-        )}
-        {onTaskRemovida && confirmandoRemocao && (
-          <span className="task-card__confirmar-remocao">
-            Remover esta Task permanentemente?
-            <button
-              type="button"
-              onClick={handleConfirmarRemocao}
-              disabled={removendo}
-              data-testid="task-card-confirmar-remocao"
-            >
-              {removendo ? 'Removendo...' : 'Confirmar'}
-            </button>
-            <button
-              type="button"
-              onClick={cancelarRemocao}
-              disabled={removendo}
-              data-testid="task-card-cancelar-remocao"
-            >
-              Cancelar
-            </button>
-          </span>
         )}
         <button
           type="button"
@@ -619,12 +599,6 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
         </div>
       )}
 
-      {erroRemocao && (
-        <p role="alert" className="task-card__erro" data-testid="task-card-erro-remocao">
-          {erroRemocao}
-        </p>
-      )}
-
       {erroRepetir && (
         <p role="alert" className="task-card__erro" data-testid="task-card-erro-repetir">
           {erroRepetir}
@@ -658,6 +632,20 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
           titulo="Repetir último acordo"
           onConfirmar={handleConfirmarRepetirUltimoAcordo}
           onCancelar={handleCancelarModal}
+        />
+      )}
+
+      {confirmandoRemocao && (
+        <ConfirmacaoModal
+          titulo="Remover Task"
+          mensagem={`Remover a Task "${item.titulo}" permanentemente?`}
+          confirmando={removendo}
+          confirmandoLabel="Removendo..."
+          erro={erroRemocao}
+          onConfirmar={handleConfirmarRemocao}
+          onCancelar={cancelarRemocao}
+          testIdConfirmar="task-card-confirmar-remocao"
+          testIdCancelar="task-card-cancelar-remocao"
         />
       )}
     </article>

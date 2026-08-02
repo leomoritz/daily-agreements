@@ -1,0 +1,39 @@
+.confirmacao-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirmacao-modal {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 28rem;
+  width: 90%;
+  text-align: left;
+}
+
+.confirmacao-modal__titulo {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.confirmacao-modal__mensagem {
+  margin: 0 0 1rem;
+}
+
+.confirmacao-modal__acoes {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.confirmacao-modal__erro {
+  color: var(--color-danger);
+  font-weight: 600;
+  margin: 1rem 0 0;
+}
