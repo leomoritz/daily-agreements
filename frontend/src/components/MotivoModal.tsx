@@ -2,7 +2,12 @@
 // Components > MotivoModal), reutilizado tanto pela Acao_Marcar_Nao_Cumprido
 // (Requisito 3) quanto pela Acao_Repetir_Ultimo_Acordo (Requisito 4).
 //
-// Requisito 3.1: abre com o Combobox_de_Motivo sem seleção e sem texto.
+// Requisito 3.1: abre com o Combobox_de_Motivo sem seleção e sem texto,
+// exceto quando `motivoInicial` é informado — nesse caso (Ultimo_Motivo_
+// Informado da Task, reutilizado tanto por "Marcar como não cumprido"
+// quanto por "Repetir último acordo"), o Combobox_de_Motivo abre
+// pré-preenchido com esse valor, que o usuário pode editar livremente
+// antes de confirmar.
 // Requisito 3.2/4.1: o Combobox_de_Motivo é um único `<input list="...">`
 // com `<datalist>` alimentado por `listarMotivos()`, permitindo digitar um
 // nome novo mesmo quando o Cadastro_de_Motivos_de_Nao_Cumprimento está
@@ -34,15 +39,21 @@ import './MotivoModal.css';
 export interface MotivoModalProps {
   /** Título exibido no cabeçalho do modal. */
   titulo: string;
+  /**
+   * Valor inicial do Combobox_de_Motivo (ex.: o Ultimo_Motivo_Informado
+   * da Task), permitindo reutilizar o último motivo sem redigitá-lo. O
+   * usuário ainda pode alterá-lo livremente antes de confirmar.
+   */
+  motivoInicial?: string;
   /** Chamado ao confirmar, com o texto corrente do Combobox_de_Motivo (sem trim). */
   onConfirmar: (motivoNome: string) => Promise<void>;
   /** Chamado ao cancelar (botão de cancelamento, `Esc` ou fechamento do modal). */
   onCancelar: () => void;
 }
 
-export function MotivoModal({ titulo, onConfirmar, onCancelar }: MotivoModalProps) {
+export function MotivoModal({ titulo, motivoInicial, onConfirmar, onCancelar }: MotivoModalProps) {
   const [motivos, setMotivos] = useState<MotivoNaoCumprimento[]>([]);
-  const [motivoNome, setMotivoNome] = useState('');
+  const [motivoNome, setMotivoNome] = useState(motivoInicial ?? '');
   const [enviando, setEnviando] = useState(false);
   const [erroSubmissao, setErroSubmissao] = useState<string | null>(null);
 

@@ -7,9 +7,11 @@
 // Task_Com_Acordo, exibe título, Tipo_de_Acordo, Responsável (quando
 // houver) e, na ordem exigida, "Registrado em" → Campo_Numero_de_Tentativas
 // (sempre, inclusive zero) → Campo_Ultimo_Motivo (omitido, com o rótulo,
-// quando a Task não possui Ultimo_Motivo_Informado). Requisito 3.3 (spec
-// base): para Task_Nova, exibe título e Responsável (quando houver), sem
-// Campo_Numero_de_Tentativas nem Campo_Ultimo_Motivo.
+// quando a Task não possui Ultimo_Motivo_Informado, ou quando o
+// Acordo_Atual está `cumprido` — o motivo de uma tentativa anterior deixa
+// de ser relevante depois que o Acordo_Atual foi cumprido). Requisito 3.3
+// (spec base): para Task_Nova, exibe título e Responsável (quando
+// houver), sem Campo_Numero_de_Tentativas nem Campo_Ultimo_Motivo.
 // Requisito 1.4, 1.5, 1.6: os textos de alerta ("Alerta: Acordo não
 // cumprido" e "Alerta: número de tentativas de 'Avaliar e planejar'
 // alto") não contêm nenhum contador — o Campo_Numero_de_Tentativas é a
@@ -38,22 +40,26 @@
 //   `estadoCumprimentoAcordoAtual` e `responsavelIdAtual` do item
 //   (Requisitos 8.1–8.4, 9.1, 9.4, 9.6, 9.7). Exibida para toda Task.
 // - "Marcar como não cumprido" (Acao_Marcar_Nao_Cumprido, Requisito 3):
-//   abre o `MotivoModal` e, ao confirmar, submete
-//   `PATCH /tasks/:id/acordos/atual` com `resultado: 'nao_cumprido'` e o
-//   `motivoNome` informado. Exibida somente para Task_Com_Acordo,
-//   permanecendo visível porém desabilitada (`disabled` + `aria-disabled`
-//   + `title`) quando `tipoAcordoNome === 'Avaliar e planejar'`
-//   (Requisitos 5.1, 5.4, 5.6) — nesse caso nenhum clique abre o modal ou
-//   dispara requisição. O botão "Avaliar" (e o `AvaliarAcordoForm`) não
-//   existe mais (Requisito 8.6): a avaliação de cumprimento passa a
-//   ocorrer via Registro_de_Acordo_com_Avaliacao, "Repetir último
-//   acordo", "Finalizar" ou esta ação.
+//   abre o `MotivoModal` (pré-preenchido com `ultimoMotivoNome`, quando
+//   houver) e, ao confirmar, submete `PATCH /tasks/:id/acordos/atual` com
+//   `resultado: 'nao_cumprido'` e o `motivoNome` informado. Exibida
+//   apenas para Task_Com_Acordo cujo `tipoAcordoNome` não é "Avaliar e
+//   planejar" — para esse tipo, a ação é ocultada (não apenas
+//   desabilitada), já que Acordos de "Avaliar e planejar" só são
+//   avaliados por repetição ou finalização. O botão "Avaliar" (e o
+//   `AvaliarAcordoForm`) não existe mais (Requisito 8.6): a avaliação de
+//   cumprimento passa a ocorrer via Registro_de_Acordo_com_Avaliacao,
+//   "Repetir último acordo", "Finalizar" ou esta ação.
 // - "Repetir último acordo" (Acao_Repetir_Ultimo_Acordo, Requisito 4):
-//   decide localmente se abre o `MotivoModal` — abre quando
-//   `tipoAcordoNome !== 'Avaliar e planejar'` ou quando
-//   `tentativasAvaliarPlanejar >= 2` (Requisitos 4.1, 4.3, 4.4); caso
-//   contrário chama `POST /tasks/:id/acordos/repetir` diretamente, sem
-//   modal. Exibida somente para Task_Com_Acordo.
+//   exibida apenas quando `tipoAcordoNome === 'Avaliar e planejar'` ou
+//   `estadoCumprimentoAcordoAtual === 'nao_cumprido'` — nos demais casos
+//   (Acordo_Atual pendente ou cumprido, com outro Tipo_de_Acordo) a ação
+//   não se aplica e é ocultada. Quando exibida, decide localmente se
+//   abre o `MotivoModal` (pré-preenchido com `ultimoMotivoNome`, quando
+//   houver) — abre quando `tipoAcordoNome !== 'Avaliar e planejar'` ou
+//   quando `tentativasAvaliarPlanejar >= 2` (Requisitos 4.1, 4.3, 4.4);
+//   caso contrário chama `POST /tasks/:id/acordos/repetir` diretamente,
+//   sem modal.
 // - "Ver histórico": abre `TaskHistoricoModal` (Requisito 7 da spec
 //   base). Exibida para toda Task, independente de `onAcordoAlterado`.
 // - "Finalizar": chama diretamente `POST /tasks/:id/finalizar`. Exibida
@@ -167,7 +173,21 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
   const [erroFinalizar, setErroFinalizar] = useState<string | null>(null);
 
   const tipoAcordoAtual = comAcordo ? item.tipoAcordoNome : undefined;
-  const acaoMarcarNaoCumpridoDesabilitada = tipoAcordoAtual === TIPO_ACORDO_AVALIAR_PLANEJAR;
+  const ehTipoAvaliarPlanejar = tipoAcordoAtual === TIPO_ACORDO_AVALIAR_PLANEJAR;
+
+  // Ação "Marcar como não cumprido": oculta (não apenas desabilita) para
+  // Acordos de "Avaliar e planejar", que só são avaliados por repetição
+  // ou finalização.
+  const exibeMarcarNaoCumprido = comAcordo && !ehTipoAvaliarPlanejar;
+
+  // Ação "Repetir último acordo": só se aplica quando o Tipo_de_Acordo é
+  // "Avaliar e planejar" (repetição faz parte do próprio fluxo desse
+  // tipo) ou quando o Acordo_Atual já foi avaliado como não cumprido
+  // (repetir é a forma de tentar novamente); nos demais casos (pendente
+  // ou cumprido, com outro Tipo_de_Acordo) a ação não se aplica.
+  const exibeRepetirUltimoAcordo =
+    comAcordo &&
+    (ehTipoAvaliarPlanejar || item.estadoCumprimentoAcordoAtual === 'nao_cumprido');
 
   const tituloInputId = `task-card-editar-titulo-${item.id}`;
   const responsavelInputId = `task-card-editar-responsavel-${item.id}`;
@@ -182,7 +202,7 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
   }
 
   function handleAbrirMarcarNaoCumprido() {
-    if (operacaoEmAndamento || acaoMarcarNaoCumpridoDesabilitada) {
+    if (operacaoEmAndamento) {
       return;
     }
     setModalAberto('marcar-nao-cumprido');
@@ -413,7 +433,7 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
           <p className="task-card__num-tentativas" data-testid="task-card-num-tentativas">
             <span className="task-card__label">Nº de tentativas:</span> {item.numTentativas}
           </p>
-          {item.ultimoMotivoNome && (
+          {item.ultimoMotivoNome && item.estadoCumprimentoAcordoAtual !== 'cumprido' && (
             <p className="task-card__ultimo-motivo" data-testid="task-card-ultimo-motivo">
               <span className="task-card__label">Último motivo informado:</span>{' '}
               {item.ultimoMotivoNome}
@@ -456,23 +476,17 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
             Registrar acordo
           </button>
         )}
-        {onAcordoAlterado && comAcordo && (
+        {onAcordoAlterado && exibeMarcarNaoCumprido && (
           <button
             type="button"
             onClick={handleAbrirMarcarNaoCumprido}
-            disabled={operacaoEmAndamento || acaoMarcarNaoCumpridoDesabilitada}
-            aria-disabled={acaoMarcarNaoCumpridoDesabilitada}
-            title={
-              acaoMarcarNaoCumpridoDesabilitada
-                ? 'Acordos de "Avaliar e planejar" são avaliados apenas por repetição ou finalização.'
-                : undefined
-            }
+            disabled={operacaoEmAndamento}
             data-testid="task-card-marcar-nao-cumprido"
           >
             Registrar não cumprido
           </button>
         )}
-        {onAcordoAlterado && comAcordo && (
+        {onAcordoAlterado && exibeRepetirUltimoAcordo && (
           <button
             type="button"
             onClick={handleRepetirUltimoAcordo}
@@ -543,6 +557,7 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
       {modalAberto === 'marcar-nao-cumprido' && (
         <MotivoModal
           titulo="Marcar como não cumprido"
+          motivoInicial={comAcordo ? item.ultimoMotivoNome : undefined}
           onConfirmar={handleConfirmarMarcarNaoCumprido}
           onCancelar={handleCancelarModal}
         />
@@ -551,6 +566,7 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
       {modalAberto === 'repetir-ultimo-acordo' && (
         <MotivoModal
           titulo="Repetir último acordo"
+          motivoInicial={comAcordo ? item.ultimoMotivoNome : undefined}
           onConfirmar={handleConfirmarRepetirUltimoAcordo}
           onCancelar={handleCancelarModal}
         />

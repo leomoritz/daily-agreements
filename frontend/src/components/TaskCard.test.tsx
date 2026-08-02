@@ -163,9 +163,12 @@ describe('TaskCard', () => {
   });
 
   describe('Repetir último acordo', () => {
-    it('exibe o botão "Repetir último acordo" apenas para Task_Com_Acordo quando onAcordoAlterado é informado', () => {
+    it('exibe o botão "Repetir último acordo" para Task_Com_Acordo com Acordo_Atual não cumprido quando onAcordoAlterado é informado', () => {
       const { rerender } = render(
-        <TaskCard item={criarTaskComAcordo()} onAcordoAlterado={vi.fn()} />,
+        <TaskCard
+          item={criarTaskComAcordo({ estadoCumprimentoAcordoAtual: 'nao_cumprido' })}
+          onAcordoAlterado={vi.fn()}
+        />,
       );
       expect(screen.getByTestId('task-card-repetir-ultimo-acordo')).toBeInTheDocument();
 
@@ -173,8 +176,45 @@ describe('TaskCard', () => {
       expect(screen.queryByTestId('task-card-repetir-ultimo-acordo')).not.toBeInTheDocument();
     });
 
+    it('exibe o botão "Repetir último acordo" para Task_Com_Acordo do tipo "Avaliar e planejar" mesmo com Acordo_Atual pendente', () => {
+      render(
+        <TaskCard
+          item={criarTaskComAcordo({
+            tipoAcordoNome: 'Avaliar e planejar',
+            estadoCumprimentoAcordoAtual: 'pendente',
+          })}
+          onAcordoAlterado={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('task-card-repetir-ultimo-acordo')).toBeInTheDocument();
+    });
+
+    it('não exibe o botão quando o Acordo_Atual está pendente ou cumprido com outro Tipo_de_Acordo', () => {
+      const { rerender } = render(
+        <TaskCard
+          item={criarTaskComAcordo({
+            tipoAcordoNome: 'Enviar para review',
+            estadoCumprimentoAcordoAtual: 'pendente',
+          })}
+          onAcordoAlterado={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('task-card-repetir-ultimo-acordo')).not.toBeInTheDocument();
+
+      rerender(
+        <TaskCard
+          item={criarTaskComAcordo({
+            tipoAcordoNome: 'Enviar para review',
+            estadoCumprimentoAcordoAtual: 'cumprido',
+          })}
+          onAcordoAlterado={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId('task-card-repetir-ultimo-acordo')).not.toBeInTheDocument();
+    });
+
     it('não exibe o botão quando onAcordoAlterado não é informado', () => {
-      render(<TaskCard item={criarTaskComAcordo()} />);
+      render(<TaskCard item={criarTaskComAcordo({ estadoCumprimentoAcordoAtual: 'nao_cumprido' })} />);
       expect(screen.queryByTestId('task-card-repetir-ultimo-acordo')).not.toBeInTheDocument();
     });
 
@@ -226,6 +266,26 @@ describe('TaskCard', () => {
       );
       expect(onAcordoAlterado).not.toHaveBeenCalled();
     });
+
+    it('abre o Modal_de_Motivo com o Ultimo_Motivo_Informado pré-selecionado', async () => {
+      listarMotivos.mockResolvedValue([]);
+
+      render(
+        <TaskCard
+          item={criarTaskComAcordo({
+            tipoAcordoNome: 'Enviar para review',
+            estadoCumprimentoAcordoAtual: 'nao_cumprido',
+            ultimoMotivoNome: 'Dependência externa',
+          })}
+          onAcordoAlterado={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('task-card-repetir-ultimo-acordo'));
+
+      const combobox = (await screen.findByTestId('motivo-modal-combobox')) as HTMLInputElement;
+      expect(combobox.value).toBe('Dependência externa');
+    });
   });
 
   // Property 1: Renderização do Card_de_Task é fiel ao item recebido
@@ -240,6 +300,11 @@ describe('TaskCard', () => {
     // Nomes de motivo de 1 a 100 caracteres (Requisito 2.1); `undefined` representa
     // a ausência de Ultimo_Motivo_Informado (Requisito 2.2, 2.7).
     const motivoNomeArb = fc.option(fc.string({ minLength: 1, maxLength: 100 }), { nil: undefined });
+    const estadoArb = fc.constantFrom<'pendente' | 'cumprido' | 'nao_cumprido'>(
+      'pendente',
+      'cumprido',
+      'nao_cumprido',
+    );
 
     const itemGeradoArb = fc.oneof(
       fc.record({
@@ -250,6 +315,7 @@ describe('TaskCard', () => {
         grupo: fc.constant<'comAcordo'>('comAcordo'),
         numTentativas: numTentativasArb,
         ultimoMotivoNome: motivoNomeArb,
+        estadoCumprimentoAcordoAtual: estadoArb,
       }),
     );
 
@@ -269,8 +335,12 @@ describe('TaskCard', () => {
           return;
         }
 
-        const { numTentativas, ultimoMotivoNome } = gerado;
-        const item = criarTaskComAcordo({ numTentativas, ultimoMotivoNome });
+        const { numTentativas, ultimoMotivoNome, estadoCumprimentoAcordoAtual } = gerado;
+        const item = criarTaskComAcordo({
+          numTentativas,
+          ultimoMotivoNome,
+          estadoCumprimentoAcordoAtual,
+        });
         const { unmount } = render(<TaskCard item={item} />);
 
         try {
@@ -287,8 +357,10 @@ describe('TaskCard', () => {
 
           // Requisitos 2.1, 2.2, 2.7, 10.3: Campo_Ultimo_Motivo exibe o nome exato
           // quando presente (inclusive espaços que façam parte do nome — daí não
-          // usar `.trim()` aqui) e fica ausente (com o rótulo) quando não houver.
-          if (ultimoMotivoNome !== undefined) {
+          // usar `.trim()` aqui) e o Acordo_Atual não está `cumprido`; fica
+          // ausente (com o rótulo) quando não houver motivo ou quando o
+          // Acordo_Atual está `cumprido`.
+          if (ultimoMotivoNome !== undefined && estadoCumprimentoAcordoAtual !== 'cumprido') {
             const campoMotivo = screen.getByTestId('task-card-ultimo-motivo');
             expect(campoMotivo.textContent).toBe(
               `Último motivo informado: ${ultimoMotivoNome}`,
@@ -484,39 +556,36 @@ describe('TaskCard', () => {
         .string({ minLength: 1, maxLength: 30 })
         .filter((valor) => valor !== 'Avaliar e planejar'),
     );
+    const estadoArb = fc.constantFrom<'pendente' | 'cumprido' | 'nao_cumprido'>(
+      'pendente',
+      'cumprido',
+      'nao_cumprido',
+    );
 
     listarMotivos.mockResolvedValue([]);
 
     fc.assert(
-      fc.property(tipoAcordoNomeArb, (tipoAcordoNome) => {
-        const item = criarTaskComAcordo({ tipoAcordoNome });
+      fc.property(tipoAcordoNomeArb, estadoArb, (tipoAcordoNome, estadoCumprimentoAcordoAtual) => {
+        const item = criarTaskComAcordo({ tipoAcordoNome, estadoCumprimentoAcordoAtual });
         const { unmount } = render(<TaskCard item={item} onAcordoAlterado={vi.fn()} />);
 
         try {
-          // Requisito 5.1: a ação "Marcar como não cumprido" permanece
-          // sempre visível para Task_Com_Acordo, independentemente do
-          // Tipo_de_Acordo.
-          const botaoMarcarNaoCumprido = screen.getByTestId('task-card-marcar-nao-cumprido');
-          expect(botaoMarcarNaoCumprido).toBeInTheDocument();
+          const ehAvaliarPlanejar = tipoAcordoNome === 'Avaliar e planejar';
 
-          const desabilitada = tipoAcordoNome === 'Avaliar e planejar';
-
-          // Requisitos 5.4, 5.6: desabilitada (com aria-disabled) somente
-          // quando o Tipo_de_Acordo do Acordo_Atual é "Avaliar e
-          // planejar"; habilitada nos demais casos.
-          if (desabilitada) {
-            expect(botaoMarcarNaoCumprido).toBeDisabled();
-            expect(botaoMarcarNaoCumprido).toHaveAttribute('aria-disabled', 'true');
+          // Requisitos 5.1, 5.4, 5.6: a ação "Marcar como não cumprido" é
+          // ocultada quando o Tipo_de_Acordo do Acordo_Atual é "Avaliar e
+          // planejar", e exibida (habilitada) nos demais casos.
+          const botaoMarcarNaoCumprido = screen.queryByTestId('task-card-marcar-nao-cumprido');
+          if (ehAvaliarPlanejar) {
+            expect(botaoMarcarNaoCumprido).not.toBeInTheDocument();
           } else {
+            expect(botaoMarcarNaoCumprido).toBeInTheDocument();
             expect(botaoMarcarNaoCumprido).not.toBeDisabled();
-            expect(botaoMarcarNaoCumprido).toHaveAttribute('aria-disabled', 'false');
-          }
 
-          // Clicar no botão desabilitado não deve abrir o Modal_de_Motivo
-          // nem disparar chamada à API.
-          fireEvent.click(botaoMarcarNaoCumprido);
-          if (desabilitada) {
-            expect(screen.queryByTestId('motivo-modal')).not.toBeInTheDocument();
+            // Clicar no botão abre o Modal_de_Motivo, sem disparar
+            // chamada à API diretamente.
+            fireEvent.click(botaoMarcarNaoCumprido!);
+            expect(screen.getByTestId('motivo-modal')).toBeInTheDocument();
             expect(avaliarAcordoAtual).not.toHaveBeenCalled();
           }
 
@@ -527,6 +596,58 @@ describe('TaskCard', () => {
             .queryAllByRole('button')
             .find((botao) => botao.textContent?.trim() === 'Avaliar');
           expect(botaoAvaliarExato).toBeUndefined();
+        } finally {
+          unmount();
+        }
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it('abre o Modal_de_Motivo de "Marcar como não cumprido" com o Ultimo_Motivo_Informado pré-selecionado', async () => {
+    listarMotivos.mockResolvedValue([]);
+
+    render(
+      <TaskCard
+        item={criarTaskComAcordo({ ultimoMotivoNome: 'Bloqueado por dependência' })}
+        onAcordoAlterado={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('task-card-marcar-nao-cumprido'));
+
+    const combobox = (await screen.findByTestId('motivo-modal-combobox')) as HTMLInputElement;
+    expect(combobox.value).toBe('Bloqueado por dependência');
+  });
+
+  // Property 24: Disponibilidade da ação "Repetir último acordo"
+  it('Feature: melhorias-acordos, Property 24: Disponibilidade da ação "Repetir último acordo"', () => {
+    const tipoAcordoNomeArb = fc.oneof(
+      fc.constant('Avaliar e planejar'),
+      fc
+        .string({ minLength: 1, maxLength: 30 })
+        .filter((valor) => valor !== 'Avaliar e planejar'),
+    );
+    const estadoArb = fc.constantFrom<'pendente' | 'cumprido' | 'nao_cumprido'>(
+      'pendente',
+      'cumprido',
+      'nao_cumprido',
+    );
+
+    fc.assert(
+      fc.property(tipoAcordoNomeArb, estadoArb, (tipoAcordoNome, estadoCumprimentoAcordoAtual) => {
+        const item = criarTaskComAcordo({ tipoAcordoNome, estadoCumprimentoAcordoAtual });
+        const { unmount } = render(<TaskCard item={item} onAcordoAlterado={vi.fn()} />);
+
+        try {
+          const exibido =
+            tipoAcordoNome === 'Avaliar e planejar' || estadoCumprimentoAcordoAtual === 'nao_cumprido';
+
+          if (exibido) {
+            expect(screen.getByTestId('task-card-repetir-ultimo-acordo')).toBeInTheDocument();
+          } else {
+            expect(screen.queryByTestId('task-card-repetir-ultimo-acordo')).not.toBeInTheDocument();
+          }
         } finally {
           unmount();
         }
@@ -575,10 +696,18 @@ describe('TaskCard', () => {
           });
           const onAcordoAlterado = vi.fn();
 
+          // O botão só é exibido quando o tipo é "Avaliar e planejar" ou
+          // quando o Acordo_Atual está `nao_cumprido`; aqui fixamos
+          // `nao_cumprido` para tipos diferentes de "Avaliar e planejar",
+          // garantindo que o botão esteja sempre visível e permitindo
+          // exercitar a decisão de apresentar o Modal_de_Motivo isolada
+          // da decisão de exibir o botão (cobrida pela Property 24).
           const item = criarTaskComAcordo({
             id: 'task-acordo-1',
             tipoAcordoNome,
             tentativasAvaliarPlanejar,
+            estadoCumprimentoAcordoAtual:
+              tipoAcordoNome === 'Avaliar e planejar' ? 'pendente' : 'nao_cumprido',
           });
           const { unmount } = render(
             <TaskCard item={item} onAcordoAlterado={onAcordoAlterado} />,
