@@ -64,6 +64,11 @@ export interface RegistrarAcordoFormProps {
   responsavelIdAtual?: string;
   /** Chamado com o Acordo criado após o registro ter sido aceito pela API. */
   onRegistrado: (acordo: Acordo) => void;
+  /**
+   * Quando informado, exibe um botão "Cancelar" ao lado do botão de
+   * submissão, chamado ao ser clicado.
+   */
+  onCancelar?: () => void;
 }
 
 export function RegistrarAcordoForm({
@@ -72,6 +77,7 @@ export function RegistrarAcordoForm({
   estadoCumprimentoAcordoAtual,
   responsavelIdAtual,
   onRegistrado,
+  onCancelar,
 }: RegistrarAcordoFormProps) {
   const [carregando, setCarregando] = useState(true);
   const [tiposDeAcordo, setTiposDeAcordo] = useState<TipoAcordo[]>([]);
@@ -270,13 +276,25 @@ export function RegistrarAcordoForm({
         </div>
       )}
 
-      <button
-        type="submit"
-        disabled={enviando || tipoAcordoId === '' || (exigeConfirmacaoCumprimento && !confirmaCumprimento)}
-        data-testid="registrar-acordo-form-submit"
-      >
-        {enviando ? 'Registrando...' : 'Registrar Acordo'}
-      </button>
+      <div className="registrar-acordo-form__acoes">
+        <button
+          type="submit"
+          disabled={enviando || tipoAcordoId === '' || (exigeConfirmacaoCumprimento && !confirmaCumprimento)}
+          data-testid="registrar-acordo-form-submit"
+        >
+          {enviando ? 'Registrando...' : 'Registrar Acordo'}
+        </button>
+        {onCancelar && (
+          <button
+            type="button"
+            onClick={onCancelar}
+            disabled={enviando}
+            data-testid="registrar-acordo-form-cancelar"
+          >
+            Cancelar
+          </button>
+        )}
+      </div>
 
       {erroSubmissao && (
         <p

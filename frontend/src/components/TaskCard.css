@@ -110,12 +110,6 @@
   font-size: 1.1rem;
 }
 
-.task-card__modal-acoes {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
 .task-card__editar-form {
   display: flex;
   flex-direction: column;

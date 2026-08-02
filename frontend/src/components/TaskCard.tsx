@@ -660,17 +660,8 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
               estadoCumprimentoAcordoAtual={comAcordo ? item.estadoCumprimentoAcordoAtual : undefined}
               responsavelIdAtual={item.responsavelId}
               onRegistrado={handleRegistrado}
+              onCancelar={handleCancelarRegistrarAcordo}
             />
-
-            <div className="task-card__modal-acoes">
-              <button
-                type="button"
-                onClick={handleCancelarRegistrarAcordo}
-                data-testid="task-card-registrar-acordo-cancelar"
-              >
-                Cancelar
-              </button>
-            </div>
           </div>
         </div>
       )}
