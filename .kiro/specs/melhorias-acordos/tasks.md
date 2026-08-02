@@ -195,21 +195,21 @@ As tarefas de ajuste dos testes já existentes (tabela "Prevenção de regressõ
     - Cobrir as novas funções/campos com `fetch` mockado, incluindo resposta de erro e timeout traduzido em rejeição
     - _Requirements: 3.9, 7.11, 10.10_
 
-- [ ] 10. Implementar o Modal_de_Motivo
+- [x] 10. Implementar o Modal_de_Motivo
   - [x] 10.1 Criar `frontend/src/components/MotivoModal.tsx` e `MotivoModal.css`
     - `role="dialog"`, `aria-modal="true"`, foco inicial no Combobox_de_Motivo, `Esc` cancela; sobreposto à Lista_de_Acordos
     - Combobox_de_Motivo como um único `<input list="...">` com `<datalist>` alimentado por `listarMotivos()`, aceitando digitação de nome novo inclusive com cadastro vazio
     - Props `titulo`, `onConfirmar(motivoNome: string): Promise<void>`, `onCancelar()`; submete sempre `motivoNome` (sem trim no cliente); desabilita confirmação e cancelamento enquanto a promessa está pendente; em rejeição mantém aberto, exibe a mensagem da API dentro do modal e preserva o texto digitado
     - _Requirements: 3.1, 3.2, 3.7, 3.8, 3.9, 3.10, 4.7, 4.8, 4.10, 10.4_
-  - [ ] 10.2 Escrever teste de propriedade do Combobox_de_Motivo em `frontend/src/components/MotivoModal.test.tsx`
+  - [x] 10.2 Escrever teste de propriedade do Combobox_de_Motivo em `frontend/src/components/MotivoModal.test.tsx`
     - **Property 5: O Combobox_de_Motivo oferece exatamente o cadastro**
     - **Validates: Requirements 3.2**
     - Tag: `Feature: melhorias-acordos, Property 5`; `fast-check` + `@testing-library/react` com `../api/client` mockado, cadastros vazio, unitário e grande
-  - [ ] 10.3 Escrever testes de unidade do `MotivoModal` em `frontend/src/components/MotivoModal.test.tsx`
+  - [x] 10.3 Escrever testes de unidade do `MotivoModal` em `frontend/src/components/MotivoModal.test.tsx`
     - Abrir com campo limpo e sem requisição; cancelar sem requisição; duplo-clique com promessa pendente resultando em uma única submissão; rejeição da API preservando o texto; timeout de 30 s tratado como rejeição
     - _Requirements: 3.1, 3.7, 3.9, 3.10, 4.7, 4.10_
 
-- [ ] 11. Reformular o `TaskCard`
+- [x] 11. Reformular o `TaskCard`
   - [x] 11.1 Alterar `frontend/src/components/TaskCard.tsx` (e `TaskCard.css` quando necessário)
     - Exibir, na ordem: "Registrado em" → "Nº de tentativas" (`numTentativas`, sempre, inclusive zero, só para Task_Com_Acordo) → "Último motivo informado" (`ultimoMotivoNome`, com rótulo omitido quando ausente)
     - Textos de alerta sem contador: "Alerta: Acordo não cumprido" e "Alerta: número de tentativas de 'Avaliar e planejar' alto"
@@ -219,78 +219,78 @@ As tarefas de ajuste dos testes já existentes (tabela "Prevenção de regressõ
     - Um único estado `operacaoEmAndamento` desabilita todas as ações do card enquanto qualquer operação está pendente; após sucesso, fechar modal/painel e chamar `onAcordoAlterado()`
     - Passar `estadoCumprimentoAcordoAtual` e `responsavelIdAtual` ao `RegistrarAcordoForm`, e usar `responsavelId` do item (em lugar do casamento por `nomeLogin`) na edição de Task
     - _Requirements: 1.1, 1.2, 1.4, 1.5, 1.6, 1.7, 2.1, 2.2, 2.7, 3.1, 4.1, 4.3, 4.4, 4.11, 5.1, 5.4, 5.6, 8.6, 9.6, 10.11_
-  - [ ] 11.2 Remover `frontend/src/components/AvaliarAcordoForm.tsx`, `AvaliarAcordoForm.css` e `AvaliarAcordoForm.test.tsx`
+  - [x] 11.2 Remover `frontend/src/components/AvaliarAcordoForm.tsx`, `AvaliarAcordoForm.css` e `AvaliarAcordoForm.test.tsx`
     - O fluxo do botão "Avaliar" deixa de existir; garantir que nenhum import remanescente aponte para esses arquivos
     - _Requirements: 8.6_
-  - [ ] 11.3 Escrever teste de propriedade da renderização do card em `frontend/src/components/TaskCard.test.tsx`
+  - [x] 11.3 Escrever teste de propriedade da renderização do card em `frontend/src/components/TaskCard.test.tsx`
     - **Property 1: Renderização do Card_de_Task é fiel ao item recebido**
     - **Validates: Requirements 1.1, 1.2, 1.7, 2.1, 2.2, 2.7, 10.3**
     - Tag: `Feature: melhorias-acordos, Property 1`; geradores com `numTentativas` em 0 e 9999 e nomes de motivo de 1 a 100 caracteres
-  - [ ] 11.4 Escrever teste de propriedade das mensagens de alerta em `frontend/src/components/TaskCard.test.tsx`
+  - [x] 11.4 Escrever teste de propriedade das mensagens de alerta em `frontend/src/components/TaskCard.test.tsx`
     - **Property 2: Mensagens de alerta não contêm contadores**
     - **Validates: Requirements 1.4, 1.5, 1.6**
     - Tag: `Feature: melhorias-acordos, Property 2`
-  - [ ] 11.5 Escrever teste de propriedade da disponibilidade das ações em `frontend/src/components/TaskCard.test.tsx`
+  - [x] 11.5 Escrever teste de propriedade da disponibilidade das ações em `frontend/src/components/TaskCard.test.tsx`
     - **Property 18: Disponibilidade das ações do Card_de_Task**
     - **Validates: Requirements 5.1, 5.4, 5.6, 8.6**
     - Tag: `Feature: melhorias-acordos, Property 18`
-  - [ ] 11.6 Escrever teste de propriedade da decisão do modal na repetição em `frontend/src/components/TaskCard.test.tsx`
+  - [x] 11.6 Escrever teste de propriedade da decisão do modal na repetição em `frontend/src/components/TaskCard.test.tsx`
     - **Property 12: Decisão de apresentar o Modal_de_Motivo na repetição**
     - **Validates: Requirements 4.1, 4.4**
     - Tag: `Feature: melhorias-acordos, Property 12`; gerador variando `tipoAcordoNome` e `tentativasAvaliarPlanejar` (inclusive 0, 1, 2 e valores altos)
-  - [ ] 11.7 Ajustar os testes existentes de `frontend/src/components/TaskCard.test.tsx`
+  - [x] 11.7 Ajustar os testes existentes de `frontend/src/components/TaskCard.test.tsx`
     - Atualizar as asserções de texto dos alertas (hoje esperam o contador na mensagem), remover qualquer expectativa do botão "Avaliar" e estender as fixtures com os novos campos do item
     - _Requirements: 1.4, 1.5, 8.6, 10.1_
 
-- [ ] 12. Ajustar o `RegistrarAcordoForm`
-  - [ ] 12.1 Alterar `frontend/src/components/RegistrarAcordoForm.tsx`
+- [x] 12. Ajustar o `RegistrarAcordoForm`
+  - [x] 12.1 Alterar `frontend/src/components/RegistrarAcordoForm.tsx`
     - Novas props `estadoCumprimentoAcordoAtual?` e `responsavelIdAtual?`; com Acordo_Atual `pendente`, exibir checkbox obrigatório "O acordo atual foi cumprido", habilitar o submit só com ele marcado e enviar `confirmaCumprimentoAcordoAtual: true`; nos demais casos, não exibir o campo
     - Seletor_de_Responsavel iniciando com `responsavelIdAtual` quando o id existe na lista de `GET /usuarios`, e vazio quando não há Responsável ou o id não pertence ao cadastro; submeter sem `responsavelId` quando a seleção está vazia
     - Renderizar os Usuários exatamente na ordem recebida do servidor; falha no carregamento exibe erro e deixa o seletor sem opções; erro da API mantém o formulário aberto com todos os valores preservados
     - _Requirements: 6.3, 6.7, 6.8, 8.1, 8.2, 8.3, 8.4, 8.5, 9.1, 9.3, 9.4, 9.7, 9.8, 9.9, 10.4_
-  - [ ] 12.2 Escrever teste de propriedade da forma do formulário em `frontend/src/components/RegistrarAcordoForm.test.tsx`
+  - [x] 12.2 Escrever teste de propriedade da forma do formulário em `frontend/src/components/RegistrarAcordoForm.test.tsx`
     - **Property 16: Forma do formulário de registro depende do estado do Acordo_Atual**
     - **Validates: Requirements 8.1, 8.3**
     - Tag: `Feature: melhorias-acordos, Property 16`
-  - [ ] 12.3 Escrever teste de propriedade da pré-seleção do Responsável em `frontend/src/components/RegistrarAcordoForm.test.tsx`
+  - [x] 12.3 Escrever teste de propriedade da pré-seleção do Responsável em `frontend/src/components/RegistrarAcordoForm.test.tsx`
     - **Property 23: Pré-seleção do Responsável nos formulários**
     - **Validates: Requirements 9.1, 9.4, 9.6, 9.7**
     - Tag: `Feature: melhorias-acordos, Property 23`; cobrir também o formulário de edição de Task
-  - [ ] 12.4 Escrever teste de propriedade da preservação da ordem recebida do servidor
+  - [x] 12.4 Escrever teste de propriedade da preservação da ordem recebida do servidor
     - **Property 20: O cliente preserva a ordem recebida do servidor**
     - **Validates: Requirements 6.3, 6.6, 6.7**
     - Tag: `Feature: melhorias-acordos, Property 20`; exercitar o Seletor_de_Responsavel (`RegistrarAcordoForm.test.tsx`) e a listagem de Usuários da Administração de Cadastros (`frontend/src/components/CadastroSection.test.tsx`), incluindo a sequência vazia
-  - [ ] 12.5 Escrever testes de unidade do formulário em `frontend/src/components/RegistrarAcordoForm.test.tsx`
+  - [x] 12.5 Escrever testes de unidade do formulário em `frontend/src/components/RegistrarAcordoForm.test.tsx`
     - Submissão sem confirmação rejeitada pela API mantendo os valores; erro de Responsável não cadastrado; falha ao carregar Usuários
     - _Requirements: 6.8, 8.5, 8.11, 9.9, 10.4_
 
-- [ ] 13. Implementar a aba "Acordos Não Atualizados" e integrar a lista
+- [x] 13. Implementar a aba "Acordos Não Atualizados" e integrar a lista
   - [x] 13.1 Criar `frontend/src/pages/AcordosNaoAtualizadosPage.tsx` e `AcordosNaoAtualizadosPage.css`
     - Consumir `obterAcordosNaoAtualizados()` com indicação de carregamento; em falha ou timeout de 3 s, encerrar o carregamento, exibir erro e oferecer "Tentar novamente"
     - Cada item exibe título, Responsável (quando houver), data em dd/mm/aaaa (quando houver) e Tipo_de_Acordo do Acordo_Atual (quando houver); Tasks sem Acordo exibem "Sem Acordo registrado" no lugar da data e do tipo
     - Lista vazia exibe "Todas as Tasks ativas possuem Acordo registrado hoje" e nenhum item; os dados são recarregados a cada montagem da página, como em `AtividadesFinalizadasPage`
     - _Requirements: 7.2, 7.6, 7.8, 7.9, 7.10, 7.11, 10.8_
-  - [ ] 13.2 Escrever teste de propriedade da renderização do item em `frontend/src/pages/AcordosNaoAtualizadosPage.test.tsx`
+  - [x] 13.2 Escrever teste de propriedade da renderização do item em `frontend/src/pages/AcordosNaoAtualizadosPage.test.tsx`
     - **Property 22: Renderização do item de Acordo Não Atualizado**
     - **Validates: Requirements 7.6, 7.10**
     - Tag: `Feature: melhorias-acordos, Property 22`; gerador combinando presença/ausência de Responsável, data e tipo
-  - [ ] 13.3 Escrever testes de unidade da página em `frontend/src/pages/AcordosNaoAtualizadosPage.test.tsx`
+  - [x] 13.3 Escrever testes de unidade da página em `frontend/src/pages/AcordosNaoAtualizadosPage.test.tsx`
     - Estado de carregamento, lista vazia com a indicação de tudo atualizado, falha e timeout com ação de nova tentativa, recarregamento a cada seleção da aba
     - _Requirements: 7.2, 7.8, 7.11, 10.8_
-  - [ ] 13.4 Adicionar a Aba_Acordos_Nao_Atualizados em `frontend/src/App.tsx`
+  - [x] 13.4 Adicionar a Aba_Acordos_Nao_Atualizados em `frontend/src/App.tsx`
     - Novo valor `'nao-atualizados'` no tipo `Pagina` e botão rotulado "Acordos Não Atualizados" posicionado entre "Lista de Acordos" e "Atividades Finalizadas", com `data-testid` no mesmo padrão dos existentes e sem alterar a posição relativa das demais abas
     - _Requirements: 7.1, 10.8_
-  - [ ] 13.5 Ajustar `frontend/src/App.test.tsx`
+  - [x] 13.5 Ajustar `frontend/src/App.test.tsx`
     - Incluir a nova aba na verificação da navegação principal (rótulo, posição e troca de página)
     - _Requirements: 7.1, 10.1_
-  - [ ] 13.6 Ajustar `frontend/src/pages/ListaDeAcordosPage.tsx`
+  - [x] 13.6 Ajustar `frontend/src/pages/ListaDeAcordosPage.tsx`
     - Repassar os novos campos do item ao `TaskCard`, exibir mensagem de erro quando a consulta inicial da lista falha (mantendo os valores do último carregamento bem-sucedido) e, quando o recarregamento após uma operação aceita falha ou excede 10 s, exibir erro com ação de repetir sem desfazer a operação persistida
     - _Requirements: 1.8, 10.3, 10.10_
-  - [ ] 13.7 Ajustar `frontend/src/pages/ListaDeAcordosPage.test.tsx`
+  - [x] 13.7 Ajustar `frontend/src/pages/ListaDeAcordosPage.test.tsx`
     - Estender as fixtures de item com `estadoCumprimentoAcordoAtual`, `responsavelId` e `ultimoMotivoNome`, e cobrir a falha de carregamento e de recarregamento
     - _Requirements: 1.8, 2.1, 8.1, 9.5, 10.1, 10.10_
 
-- [ ] 14. Checkpoint final — Garantir que todos os testes (backend e frontend) passam, perguntar ao usuário se houver dúvidas.
+- [x] 14. Checkpoint final — Garantir que todos os testes (backend e frontend) passam, perguntar ao usuário se houver dúvidas.
 
 ## Notes
 

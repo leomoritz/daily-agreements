@@ -11,9 +11,10 @@ import { useState } from 'react';
 import { ListaDeAcordosPage } from './pages/ListaDeAcordosPage';
 import { CadastrosAdminPage } from './pages/CadastrosAdminPage';
 import { AtividadesFinalizadasPage } from './pages/AtividadesFinalizadasPage';
+import { AcordosNaoAtualizadosPage } from './pages/AcordosNaoAtualizadosPage';
 import './App.css';
 
-type Pagina = 'lista' | 'admin' | 'finalizadas';
+type Pagina = 'lista' | 'admin' | 'finalizadas' | 'nao-atualizados';
 
 function App() {
   const [pagina, setPagina] = useState<Pagina>('lista');
@@ -29,6 +30,17 @@ function App() {
           data-testid="nav-lista-de-acordos"
         >
           Lista de Acordos
+        </button>
+        <button
+          type="button"
+          onClick={() => setPagina('nao-atualizados')}
+          className={
+            pagina === 'nao-atualizados' ? 'app__nav-link app__nav-link--ativo' : 'app__nav-link'
+          }
+          aria-current={pagina === 'nao-atualizados' ? 'page' : undefined}
+          data-testid="nav-acordos-nao-atualizados"
+        >
+          Acordos Não Atualizados
         </button>
         <button
           type="button"
@@ -53,6 +65,7 @@ function App() {
       </nav>
 
       {pagina === 'lista' && <ListaDeAcordosPage />}
+      {pagina === 'nao-atualizados' && <AcordosNaoAtualizadosPage />}
       {pagina === 'finalizadas' && <AtividadesFinalizadasPage />}
       {pagina === 'admin' && <CadastrosAdminPage />}
     </div>

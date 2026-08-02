@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
 import { CadastroSection } from './CadastroSection';
 import { ApiError } from '../api/errors';
@@ -81,5 +82,56 @@ describe('CadastroSection', () => {
     const itens = screen.getAllByTestId('cadastro-section-tipos-de-acordo-item');
     expect(itens).toHaveLength(1);
     expect(screen.getByText('Avaliar e planejar')).toBeInTheDocument();
+  });
+
+  // Property 20: O cliente preserva a ordem recebida do servidor
+  // Validates: Requirements 6.3, 6.6, 6.7
+  it('Feature: melhorias-acordos, Property 20: O cliente preserva a ordem recebida do servidor', async () => {
+    const itemArb = fc.record({
+      id: fc.string({ minLength: 1, maxLength: 10 }).filter((s) => s.trim() !== ''),
+      nome: fc.string({ minLength: 1, maxLength: 20 }),
+    });
+    const itensArb = fc.uniqueArray(itemArb, {
+      selector: (item) => item.id,
+      maxLength: 8,
+    });
+
+    await fc.assert(
+      fc.asyncProperty(itensArb, async (itens) => {
+        const listar = vi.fn().mockResolvedValue(itens);
+        const adicionar = vi.fn();
+
+        const { unmount } = render(
+          <CadastroSection<ItemCadastro>
+            id="usuarios"
+            titulo="Usuários"
+            nomeItemSingular="Usuário"
+            listar={listar}
+            adicionar={adicionar}
+            getId={(item) => item.id}
+            getNome={(item) => item.nome}
+          />,
+        );
+
+        if (itens.length === 0) {
+          await screen.findByText('Nenhum valor cadastrado.');
+          expect(screen.queryAllByTestId('cadastro-section-usuarios-item')).toHaveLength(0);
+        } else {
+          await screen.findAllByTestId('cadastro-section-usuarios-item');
+
+          // Os itens renderizados devem corresponder exatamente, na mesma
+          // ordem — sem reordenar, omitir, truncar ou duplicar —, à sequência
+          // retornada por `listar` (Requisitos 6.3, 6.6, 6.7).
+          const elementosItem = screen.getAllByTestId('cadastro-section-usuarios-item');
+          expect(elementosItem).toHaveLength(itens.length);
+          elementosItem.forEach((elemento, index) => {
+            expect(elemento.textContent).toContain(itens[index].nome);
+          });
+        }
+
+        unmount();
+      }),
+      { numRuns: 100 },
+    );
   });
 });

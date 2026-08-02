@@ -95,6 +95,30 @@ export function ListaDeAcordosPage() {
   // anteriores que retornem fora de ordem (ex.: digitação rápida).
   const requisicaoAtualRef = useRef(0);
 
+  /**
+   * Traduz o termo de busca corrente (`termoBusca`) para o parâmetro
+   * esperado por `obterLista`/`carregarLista`: `undefined` quando vazio
+   * após trim (Requisito 13.4), preservando o mesmo termo que originou a
+   * requisição — usado também pela ação "Tentar novamente" (Requisito
+   * 10.10), que deve repetir exatamente o carregamento que falhou.
+   */
+  const termoAtual = useCallback(() => {
+    const termo = termoBusca.trim();
+    return termo.length > 0 ? termo : undefined;
+  }, [termoBusca]);
+
+  /**
+   * Requisitos 1.8, 10.3, 10.10: em caso de falha (rejeição da API ou
+   * timeout — `obterLista` já aplica o timeout de 10 s do recarregamento,
+   * ver src/api/client.ts), exibe uma mensagem de erro sem calcular ou
+   * exibir nenhum valor localmente e, quando já existe uma lista
+   * carregada anteriormente com sucesso, mantém esses valores visíveis
+   * (o bloco de renderização abaixo passa a exibir os grupos também no
+   * status "erro" quando `lista !== null`). A operação de Acordo que
+   * disparou o recarregamento (via `handleAcordoAlterado`) já foi aceita
+   * e persistida pelo servidor antes desta chamada — uma falha aqui é
+   * apenas do recarregamento da lista, e nunca desfaz essa operação.
+   */
   const carregarLista = useCallback((termo?: string) => {
     const idDaRequisicao = ++requisicaoAtualRef.current;
 
@@ -234,8 +258,7 @@ export function ListaDeAcordosPage() {
    * `ListaDeAcordosService` no backend, evitando duplicá-la no cliente.
    */
   function handleAcordoAlterado() {
-    const termo = termoBusca.trim();
-    carregarLista(termo.length > 0 ? termo : undefined);
+    carregarLista(termoAtual());
   }
 
   /**
@@ -243,8 +266,16 @@ export function ListaDeAcordosPage() {
    * recarrega a lista completa para que as novas Tasks apareçam.
    */
   function handleLoteProcessado() {
-    const termo = termoBusca.trim();
-    carregarLista(termo.length > 0 ? termo : undefined);
+    carregarLista(termoAtual());
+  }
+
+  /**
+   * Ação "Tentar novamente" exibida junto ao erro (Requisito 10.10):
+   * repete o carregamento com o mesmo termo de busca corrente, sem
+   * desfazer nenhuma operação já persistida no servidor.
+   */
+  function handleTentarNovamente() {
+    carregarLista(termoAtual());
   }
 
   function handleChangeBusca(event: React.ChangeEvent<HTMLInputElement>) {
@@ -262,6 +293,12 @@ export function ListaDeAcordosPage() {
     termoBusca.trim().length > 0 &&
     lista.taskNova.length === 0 &&
     lista.taskComAcordo.length === 0;
+
+  // Requisitos 1.8, 10.3, 10.10: quando o carregamento (inicial ou de
+  // recarregamento) falha, os grupos continuam exibidos com os valores do
+  // último carregamento bem-sucedido, junto com a mensagem de erro e a
+  // ação de repetir — em vez de serem substituídos apenas pelo erro.
+  const exibirGrupos = lista !== null && (status === 'sucesso' || status === 'erro');
 
   return (
     <main className="lista-de-acordos-page">
@@ -287,12 +324,21 @@ export function ListaDeAcordosPage() {
       {status === 'carregando' && <p role="status">Carregando lista de Tasks...</p>}
 
       {status === 'erro' && (
-        <p role="alert" className="lista-de-acordos-page__erro">
-          {mensagemErro}
-        </p>
+        <div className="lista-de-acordos-page__erro-container">
+          <p role="alert" className="lista-de-acordos-page__erro">
+            {mensagemErro}
+          </p>
+          <button
+            type="button"
+            onClick={handleTentarNovamente}
+            data-testid="lista-de-acordos-page-tentar-novamente"
+          >
+            Tentar novamente
+          </button>
+        </div>
       )}
 
-      {status === 'sucesso' && lista !== null && (
+      {exibirGrupos && lista !== null && (
         buscaSemResultados ? (
           <p role="status" className="lista-de-acordos-page__sem-resultados">
             Nenhuma Task encontrada.

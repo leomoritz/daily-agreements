@@ -29,20 +29,21 @@
 // `responsavelIdAtual` pré-selecionado quando esse id existe na lista
 // carregada de `GET /usuarios`; sem correspondência (ou sem
 // Responsável), inicia vazio.
-// Requisito 6.3/6.7/6.8: os Usuários são renderizados exatamente na
-// ordem recebida do servidor (sem reordenar no cliente); falha no
-// carregamento exibe erro e não apresenta nenhuma opção no seletor.
-// Requisito 8.5/9.9/10.4: erro da API mantém o formulário aberto com
-// todos os valores informados preservados.
+// Requisito 6.3/6.7: os Usuários são renderizados exatamente na ordem
+// recebida do servidor (sem reordenar no cliente).
+// Requisito 6.8: falha ao carregar o Cadastro_de_Usuários exibe uma
+// mensagem de erro e apresenta o Seletor_de_Responsavel sem nenhuma
+// opção, sem impedir a apresentação do restante do formulário (o
+// Seletor_de_Tipo_de_Acordo segue a mesma regra, de forma simétrica,
+// quando é o carregamento dos Tipos de Acordo que falha).
+// Requisito 8.5/9.9/10.4: erro da API na submissão mantém o formulário
+// aberto com todos os valores informados preservados.
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { listarTiposDeAcordo, listarUsuarios, registrarAcordo } from '../api/client';
 import { ApiError } from '../api/errors';
 import type { Acordo, EstadoCumprimento, TipoAcordo, UsuarioCadastrado } from '../api/types';
 import './RegistrarAcordoForm.css';
-import { itemsEqual } from '@dnd-kit/sortable/dist/utilities';
-
-type StatusCarregamento = 'carregando' | 'sucesso' | 'erro';
 
 export interface RegistrarAcordoFormProps {
   /** Id da Task para a qual o Acordo será registrado. */
@@ -72,11 +73,11 @@ export function RegistrarAcordoForm({
   responsavelIdAtual,
   onRegistrado,
 }: RegistrarAcordoFormProps) {
-
+  const [carregando, setCarregando] = useState(true);
   const [tiposDeAcordo, setTiposDeAcordo] = useState<TipoAcordo[]>([]);
   const [usuarios, setUsuarios] = useState<UsuarioCadastrado[]>([]);
-  const [statusCarregamento, setStatusCarregamento] = useState<StatusCarregamento>('carregando');
-  const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
+  const [erroCarregamentoTipos, setErroCarregamentoTipos] = useState<string | null>(null);
+  const [erroCarregamentoUsuarios, setErroCarregamentoUsuarios] = useState<string | null>(null);
 
   const [tipoAcordoId, setTipoAcordoId] = useState('');
   const [responsavelId, setResponsavelId] = useState('');
@@ -84,37 +85,58 @@ export function RegistrarAcordoForm({
   const [enviando, setEnviando] = useState(false);
   const [erroSubmissao, setErroSubmissao] = useState<string | null>(null);
 
-  const exigeConfirmacaoCumprimento = estadoCumprimentoAcordoAtual === 'pendente' || 'nao_cumprido';
+  // Requisitos 8.1, 8.3, 8.4: a confirmação de cumprimento só é exigida
+  // quando o Acordo_Atual está `pendente`; ausente (Task_Nova), `cumprido`
+  // ou `nao_cumprido` não exibem o campo.
+  const exigeConfirmacaoCumprimento = estadoCumprimentoAcordoAtual === 'pendente';
 
   useEffect(() => {
     let cancelado = false;
 
-    setStatusCarregamento('carregando');
-    setErroCarregamento(null);
+    setCarregando(true);
+    setErroCarregamentoTipos(null);
+    setErroCarregamentoUsuarios(null);
 
-    Promise.all([listarTiposDeAcordo(), listarUsuarios()])
-      .then(([resultadoTipos, resultadoUsuarios]) => {
+    Promise.allSettled([listarTiposDeAcordo(), listarUsuarios()]).then(
+      ([resultadoTipos, resultadoUsuarios]) => {
         if (cancelado) return;
-        setTiposDeAcordo(resultadoTipos);
-        setUsuarios(resultadoUsuarios);
-        // Requisitos 9.1, 9.4, 9.7: pré-seleciona o Responsável atual
-        // apenas quando o id informado pertence à lista carregada do
-        // servidor; caso contrário (ou sem Responsável) inicia vazio.
-        const usuarioAtual = responsavelIdAtual
-          ? resultadoUsuarios.find((usuario) => usuario.id === responsavelIdAtual)
-          : undefined;
-        setResponsavelId(usuarioAtual?.id ?? '');
-        setStatusCarregamento('sucesso');
-      })
-      .catch((error: unknown) => {
-        if (cancelado) return;
-        const mensagem =
-          error instanceof ApiError
-            ? error.message
-            : 'Não foi possível carregar Tipos de Acordo e Usuários.';
-        setErroCarregamento(mensagem);
-        setStatusCarregamento('erro');
-      });
+
+        if (resultadoTipos.status === 'fulfilled') {
+          setTiposDeAcordo(resultadoTipos.value);
+        } else {
+          setTiposDeAcordo([]);
+          const erro = resultadoTipos.reason;
+          setErroCarregamentoTipos(
+            erro instanceof ApiError ? erro.message : 'Não foi possível carregar os Tipos de Acordo.',
+          );
+        }
+
+        if (resultadoUsuarios.status === 'fulfilled') {
+          const usuariosCarregados = resultadoUsuarios.value;
+          setUsuarios(usuariosCarregados);
+          // Requisitos 9.1, 9.4, 9.7: pré-seleciona o Responsável atual
+          // apenas quando o id informado pertence à lista carregada do
+          // servidor; caso contrário (ou sem Responsável) inicia vazio.
+          const usuarioAtual = responsavelIdAtual
+            ? usuariosCarregados.find((usuario) => usuario.id === responsavelIdAtual)
+            : undefined;
+          setResponsavelId(usuarioAtual?.id ?? '');
+        } else {
+          // Requisito 6.8: falha ao carregar o Cadastro_de_Usuários
+          // apresenta o Seletor_de_Responsavel sem nenhuma opção.
+          setUsuarios([]);
+          setResponsavelId('');
+          const erro = resultadoUsuarios.reason;
+          setErroCarregamentoUsuarios(
+            erro instanceof ApiError
+              ? erro.message
+              : 'Não foi possível carregar a lista de Usuários.',
+          );
+        }
+
+        setCarregando(false);
+      },
+    );
 
     return () => {
       cancelado = true;
@@ -128,7 +150,7 @@ export function RegistrarAcordoForm({
       return;
     }
 
-    if (exigeConfirmacaoCumprimento && !confirmaCumprimento) {
+    if (tipoAcordoId === '' || (exigeConfirmacaoCumprimento && !confirmaCumprimento)) {
       return;
     }
 
@@ -156,22 +178,10 @@ export function RegistrarAcordoForm({
       });
   }
 
-  if (statusCarregamento === 'carregando') {
+  if (carregando) {
     return (
       <p role="status" data-testid="registrar-acordo-form-carregando">
         Carregando Tipos de Acordo e Usuários...
-      </p>
-    );
-  }
-
-  if (statusCarregamento === 'erro') {
-    return (
-      <p
-        role="alert"
-        className="registrar-acordo-form__erro"
-        data-testid="registrar-acordo-form-erro-carregamento"
-      >
-        {erroCarregamento}
       </p>
     );
   }
@@ -205,6 +215,15 @@ export function RegistrarAcordoForm({
             </option>
           ))}
         </select>
+        {erroCarregamentoTipos && (
+          <p
+            role="alert"
+            className="registrar-acordo-form__erro"
+            data-testid="registrar-acordo-form-erro-tipos"
+          >
+            {erroCarregamentoTipos}
+          </p>
+        )}
       </div>
 
       <div className="registrar-acordo-form__campo">
@@ -223,6 +242,15 @@ export function RegistrarAcordoForm({
             </option>
           ))}
         </select>
+        {erroCarregamentoUsuarios && (
+          <p
+            role="alert"
+            className="registrar-acordo-form__erro"
+            data-testid="registrar-acordo-form-erro-usuarios"
+          >
+            {erroCarregamentoUsuarios}
+          </p>
+        )}
       </div>
 
       {exigeConfirmacaoCumprimento && comAcordo && (
@@ -244,9 +272,7 @@ export function RegistrarAcordoForm({
 
       <button
         type="submit"
-        disabled={
-          enviando || tipoAcordoId === '' || (exigeConfirmacaoCumprimento && !confirmaCumprimento)
-        }
+        disabled={enviando || tipoAcordoId === '' || (exigeConfirmacaoCumprimento && !confirmaCumprimento)}
         data-testid="registrar-acordo-form-submit"
       >
         {enviando ? 'Registrando...' : 'Registrar Acordo'}

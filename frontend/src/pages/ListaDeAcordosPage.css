@@ -14,9 +14,18 @@
   font-style: italic;
 }
 
+.lista-de-acordos-page__erro-container {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
 .lista-de-acordos-page__erro {
   color: var(--color-danger);
   font-weight: 600;
+  margin: 0;
 }
 
 .lista-de-acordos-page__busca {

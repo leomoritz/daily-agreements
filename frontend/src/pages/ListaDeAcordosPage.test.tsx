@@ -2,17 +2,18 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ListaDeAcordosPage } from './ListaDeAcordosPage';
+import { ApiError } from '../api/errors';
 import type { ListaDeAcordos } from '../api/types';
 
-const { obterLista, reordenarTask, removerTask, listarUsuarios, processarLote } = vi.hoisted(
-  () => ({
+const { obterLista, reordenarTask, removerTask, listarUsuarios, processarLote, finalizarTask } =
+  vi.hoisted(() => ({
     obterLista: vi.fn(),
     reordenarTask: vi.fn(),
     removerTask: vi.fn(),
     listarUsuarios: vi.fn(),
     processarLote: vi.fn(),
-  }),
-);
+    finalizarTask: vi.fn(),
+  }));
 
 vi.mock('../api/client', () => ({
   obterLista,
@@ -20,6 +21,7 @@ vi.mock('../api/client', () => ({
   removerTask,
   listarUsuarios,
   processarLote,
+  finalizarTask,
 }));
 
 // `SortableTaskGroup` real depende de medições de DOM/pointer events do
@@ -93,6 +95,7 @@ describe('ListaDeAcordosPage', () => {
           tipoAcordoNome: 'Avaliar e planejar',
           dataRegistroAcordoAtual: '2024-05-10T10:00:00.000Z',
           estadoCumprimentoAcordoAtual: 'pendente',
+          responsavelId: 'usuario-1',
           alerta: false,
           numTentativas: 0,
           alertaTentativasAvaliarPlanejar: false,
@@ -109,6 +112,7 @@ describe('ListaDeAcordosPage', () => {
           numTentativas: 2,
           alertaTentativasAvaliarPlanejar: false,
           tentativasAvaliarPlanejar: 0,
+          ultimoMotivoNome: 'Dependência externa',
         },
       ],
     } satisfies ListaDeAcordos);
@@ -227,5 +231,101 @@ describe('ListaDeAcordosPage', () => {
     await screen.findByText('Task que permanece');
     expect(screen.queryByText('Task a ser removida')).not.toBeInTheDocument();
     expect(removerTask).toHaveBeenCalledWith('n1');
+  });
+
+  it('exibe mensagem de erro quando o carregamento inicial falha sem carregamento anterior (Requisito 1.8)', async () => {
+    obterLista.mockRejectedValueOnce(
+      new ApiError(500, 'ERRO_INTERNO', 'Não foi possível carregar a lista de Tasks.'),
+    );
+
+    render(<ListaDeAcordosPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Não foi possível carregar a lista de Tasks.',
+    );
+    expect(screen.getByTestId('lista-de-acordos-page-tentar-novamente')).toBeInTheDocument();
+    expect(screen.queryByTestId('grupo-task-nova')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('grupo-task-com-acordo')).not.toBeInTheDocument();
+  });
+
+  it('mantém a lista anterior visível junto com o erro quando um carregamento após sucesso falha (Requisito 1.8)', async () => {
+    const listaCompleta: ListaDeAcordos = {
+      taskNova: [{ id: 'n1', titulo: 'Task já carregada', ordemExibicao: 0 }],
+      taskComAcordo: [],
+    };
+
+    obterLista.mockResolvedValueOnce(listaCompleta);
+
+    render(<ListaDeAcordosPage />);
+
+    await screen.findByText('Task já carregada');
+
+    obterLista.mockRejectedValueOnce(
+      new ApiError(500, 'ERRO_INTERNO', 'Não foi possível recarregar a lista de Tasks.'),
+    );
+
+    const campoBusca = screen.getByLabelText(/buscar por título ou responsável/i);
+    fireEvent.change(campoBusca, { target: { value: 'termo-qualquer' } });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Não foi possível recarregar a lista de Tasks.',
+    );
+    // A Task do último carregamento bem-sucedido permanece visível junto com o erro.
+    expect(screen.getByText('Task já carregada')).toBeInTheDocument();
+    expect(screen.getByTestId('lista-de-acordos-page-tentar-novamente')).toBeInTheDocument();
+  });
+
+  it('quando o recarregamento após uma operação de Acordo já aceita falha, exibe erro e "Tentar novamente" recupera sem refazer a operação (Requisitos 10.3, 10.10)', async () => {
+    const listaOriginal: ListaDeAcordos = {
+      taskNova: [],
+      taskComAcordo: [
+        {
+          id: 'c1',
+          titulo: 'Task com acordo a finalizar',
+          ordemExibicao: 0,
+          tipoAcordoNome: 'Finalizar',
+          dataRegistroAcordoAtual: '2024-05-10T10:00:00.000Z',
+          estadoCumprimentoAcordoAtual: 'pendente',
+          alerta: false,
+          numTentativas: 0,
+          alertaTentativasAvaliarPlanejar: false,
+          tentativasAvaliarPlanejar: 0,
+        },
+      ],
+    };
+    const listaAposFinalizar: ListaDeAcordos = { taskNova: [], taskComAcordo: [] };
+
+    // Carregamento inicial com sucesso.
+    obterLista.mockResolvedValueOnce(listaOriginal);
+    render(<ListaDeAcordosPage />);
+    await screen.findByText('Task com acordo a finalizar');
+
+    // A ação "Finalizar" é aceita e persistida pelo servidor...
+    finalizarTask.mockResolvedValueOnce(undefined);
+    // ...mas o recarregamento da lista disparado em seguida falha.
+    obterLista.mockRejectedValueOnce(
+      new ApiError(500, 'ERRO_INTERNO', 'Não foi possível recarregar a lista de Tasks.'),
+    );
+
+    fireEvent.click(screen.getByTestId('task-card-finalizar'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Não foi possível recarregar a lista de Tasks.',
+    );
+    expect(finalizarTask).toHaveBeenCalledTimes(1);
+    // A Task finalizada (já persistida no servidor) permanece visível
+    // junto com o erro — a falha é apenas do recarregamento.
+    expect(screen.getByText('Task com acordo a finalizar')).toBeInTheDocument();
+
+    // "Tentar novamente" repete o carregamento (sem chamar `finalizarTask`
+    // novamente) e, com sucesso, reflete o estado já persistido no servidor.
+    obterLista.mockResolvedValueOnce(listaAposFinalizar);
+
+    fireEvent.click(screen.getByTestId('lista-de-acordos-page-tentar-novamente'));
+
+    await screen.findByTestId('grupo-task-com-acordo');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Task com acordo a finalizar')).not.toBeInTheDocument();
+    expect(finalizarTask).toHaveBeenCalledTimes(1);
   });
 });
