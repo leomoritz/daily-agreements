@@ -122,6 +122,14 @@
   gap: 0.25rem;
 }
 
+.task-card__campo input {
+    height: 25px;
+}
+
+.task-card__campo select {
+  height: 30px;
+}
+
 .task-card__editar-acoes {
   display: flex;
   gap: 0.5rem;

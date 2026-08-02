@@ -240,6 +240,7 @@ export function RegistrarAcordoForm({
           onChange={(event) => setResponsavelId(event.target.value)}
           disabled={enviando}
           data-testid="registrar-acordo-form-responsavel-select"
+          className='registrar-acordo-form__select'
         >
           <option value="">Nenhum</option>
           {usuarios.map((usuario) => (
