@@ -16,26 +16,25 @@
 // única origem do valor do Nº_Tentativas.
 //
 // Requisito 9.1/9.2/9.6/9.7 (edição de título/Responsável): quando
-// `onTaskEditada` é informado, um botão "Editar" alterna o card para um
-// modo de edição com um campo de texto (título) e um select de
-// Responsável (carregado via `listarUsuarios()`), submetendo para
-// `PATCH /tasks/:id`. O Responsável atual é pré-selecionado pelo
-// `responsavelId` do item (Requisito 9.6) — não mais por correspondência
-// de `responsavelNome` com `nomeLogin` — deixando o campo sem seleção
-// quando esse id não pertence ao Cadastro_de_Usuários. Erros de
-// validação (título vazio, Responsável inválido) são exibidos dentro do
-// próprio formulário de edição sem descartar o que o usuário
-// digitou/selecionou, permitindo corrigir e tentar novamente. O
+// `onTaskEditada` é informado, um botão "Editar" abre um modal com um
+// campo de texto (título) e um select de Responsável (carregado via
+// `listarUsuarios()`), submetendo para `PATCH /tasks/:id`. O Responsável
+// atual é pré-selecionado pelo `responsavelId` do item (Requisito 9.6) —
+// não mais por correspondência de `responsavelNome` com `nomeLogin` —
+// deixando o campo sem seleção quando esse id não pertence ao
+// Cadastro_de_Usuários. Erros de validação (título vazio, Responsável
+// inválido) são exibidos dentro do próprio modal sem descartar o que o
+// usuário digitou/selecionou, permitindo corrigir e tentar novamente. O
 // resultado da edição é comunicado ao chamador (`onTaskEditada`) como
 // `{ titulo, responsavelNome }`, já resolvido a partir do Usuário
 // selecionado.
 //
 // Requisito 9.4/9.5 (remoção manual): o botão "Remover" exige uma
-// confirmação explícita antes de chamar `DELETE /tasks/:id`; erros são
-// exibidos inline.
+// confirmação explícita, via modal, antes de chamar `DELETE /tasks/:id`;
+// erros são exibidos dentro do próprio modal.
 //
 // Ações do card, quando `onAcordoAlterado` é informado:
-// - "Registrar Acordo": abre `RegistrarAcordoForm` inline, recebendo
+// - "Registrar Acordo": abre `RegistrarAcordoForm` em um modal, recebendo
 //   `estadoCumprimentoAcordoAtual` e `responsavelIdAtual` do item
 //   (Requisitos 8.1–8.4, 9.1, 9.4, 9.6, 9.7). Exibida para toda Task.
 // - "Marcar como não cumprido" (Acao_Marcar_Nao_Cumprido, Requisito 3):
@@ -170,9 +169,16 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
   const tipoAcordoAtual = comAcordo ? item.tipoAcordoNome : undefined;
   const acaoMarcarNaoCumpridoDesabilitada = tipoAcordoAtual === TIPO_ACORDO_AVALIAR_PLANEJAR;
 
+  const tituloInputId = `task-card-editar-titulo-${item.id}`;
+  const responsavelInputId = `task-card-editar-responsavel-${item.id}`;
+
   function handleRegistrado() {
     setPainelAberto('nenhum');
     onAcordoAlterado?.();
+  }
+
+  function handleCancelarRegistrarAcordo() {
+    setPainelAberto('nenhum');
   }
 
   function handleAbrirMarcarNaoCumprido() {
@@ -370,75 +376,6 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
       });
   }
 
-  if (editando) {
-    const tituloInputId = `task-card-editar-titulo-${item.id}`;
-    const responsavelInputId = `task-card-editar-responsavel-${item.id}`;
-
-    return (
-      <article className="task-card" data-testid="task-card">
-        <form
-          onSubmit={handleSalvarEdicao}
-          className="task-card__editar-form"
-          data-testid="task-card-editar-form"
-        >
-          <div className="task-card__campo">
-            <label htmlFor={tituloInputId}>Título</label>
-            <input
-              id={tituloInputId}
-              type="text"
-              value={titulo}
-              onChange={(event) => setTitulo(event.target.value)}
-              disabled={enviando}
-              data-testid="task-card-editar-titulo"
-            />
-          </div>
-
-          <div className="task-card__campo">
-            <label htmlFor={responsavelInputId}>Responsável</label>
-            <select
-              id={responsavelInputId}
-              value={responsavelId}
-              onChange={(event) => setResponsavelId(event.target.value)}
-              disabled={enviando || statusUsuarios !== 'sucesso'}
-              data-testid="task-card-editar-responsavel"
-            >
-              <option value="">Nenhum</option>
-              {usuarios.map((usuario) => (
-                <option key={usuario.id} value={usuario.id}>
-                  {usuario.nomeLogin}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="task-card__editar-acoes">
-            <button
-              type="submit"
-              disabled={enviando || statusUsuarios === 'carregando'}
-              data-testid="task-card-salvar"
-            >
-              {enviando ? 'Salvando...' : 'Salvar'}
-            </button>
-            <button
-              type="button"
-              onClick={cancelarEdicao}
-              disabled={enviando}
-              data-testid="task-card-cancelar"
-            >
-              Cancelar
-            </button>
-          </div>
-
-          {erroEdicao && (
-            <p role="alert" className="task-card__erro" data-testid="task-card-erro-edicao">
-              {erroEdicao}
-            </p>
-          )}
-        </form>
-      </article>
-    );
-  }
-
   const emAlgumAlerta = emAlerta || emAlertaTentativasAvaliarPlanejar;
 
   return (
@@ -512,11 +449,7 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
         {onAcordoAlterado && (
           <button
             type="button"
-            onClick={() =>
-              setPainelAberto((atual) =>
-                atual === 'registrar-acordo' ? 'nenhum' : 'registrar-acordo',
-              )
-            }
+            onClick={() => setPainelAberto('registrar-acordo')}
             disabled={operacaoEmAndamento}
             data-testid="task-card-registrar-acordo"
           >
@@ -587,18 +520,6 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
         </button>
       </div>
 
-      {painelAberto === 'registrar-acordo' && (
-        <div className="task-card__painel-acordo" data-testid="task-card-painel-registrar-acordo">
-          <RegistrarAcordoForm
-            taskId={item.id}
-            comAcordo={comAcordo}
-            estadoCumprimentoAcordoAtual={comAcordo ? item.estadoCumprimentoAcordoAtual : undefined}
-            responsavelIdAtual={item.responsavelId}
-            onRegistrado={handleRegistrado}
-          />
-        </div>
-      )}
-
       {erroRepetir && (
         <p role="alert" className="task-card__erro" data-testid="task-card-erro-repetir">
           {erroRepetir}
@@ -647,6 +568,111 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
           testIdConfirmar="task-card-confirmar-remocao"
           testIdCancelar="task-card-cancelar-remocao"
         />
+      )}
+
+      {editando && (
+        <div className="task-card__modal-overlay" data-testid="task-card-editar-overlay">
+          <div
+            className="task-card__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Editar Task "${item.titulo}"`}
+          >
+            <h2 className="task-card__modal-titulo">Editar Task</h2>
+
+            <form
+              onSubmit={handleSalvarEdicao}
+              className="task-card__editar-form"
+              data-testid="task-card-editar-form"
+            >
+              <div className="task-card__campo">
+                <label htmlFor={tituloInputId}>Título</label>
+                <input
+                  id={tituloInputId}
+                  type="text"
+                  value={titulo}
+                  onChange={(event) => setTitulo(event.target.value)}
+                  disabled={enviando}
+                  data-testid="task-card-editar-titulo"
+                />
+              </div>
+
+              <div className="task-card__campo">
+                <label htmlFor={responsavelInputId}>Responsável</label>
+                <select
+                  id={responsavelInputId}
+                  value={responsavelId}
+                  onChange={(event) => setResponsavelId(event.target.value)}
+                  disabled={enviando || statusUsuarios !== 'sucesso'}
+                  data-testid="task-card-editar-responsavel"
+                >
+                  <option value="">Nenhum</option>
+                  {usuarios.map((usuario) => (
+                    <option key={usuario.id} value={usuario.id}>
+                      {usuario.nomeLogin}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="task-card__editar-acoes">
+                <button
+                  type="submit"
+                  disabled={enviando || statusUsuarios === 'carregando'}
+                  data-testid="task-card-salvar"
+                >
+                  {enviando ? 'Salvando...' : 'Salvar'}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelarEdicao}
+                  disabled={enviando}
+                  data-testid="task-card-cancelar"
+                >
+                  Cancelar
+                </button>
+              </div>
+
+              {erroEdicao && (
+                <p role="alert" className="task-card__erro" data-testid="task-card-erro-edicao">
+                  {erroEdicao}
+                </p>
+              )}
+            </form>
+          </div>
+        </div>
+      )}
+
+      {painelAberto === 'registrar-acordo' && (
+        <div className="task-card__modal-overlay" data-testid="task-card-registrar-acordo-overlay">
+          <div
+            className="task-card__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Registrar Acordo — ${item.titulo}`}
+            data-testid="task-card-painel-registrar-acordo"
+          >
+            <h2 className="task-card__modal-titulo">Registrar Acordo</h2>
+
+            <RegistrarAcordoForm
+              taskId={item.id}
+              comAcordo={comAcordo}
+              estadoCumprimentoAcordoAtual={comAcordo ? item.estadoCumprimentoAcordoAtual : undefined}
+              responsavelIdAtual={item.responsavelId}
+              onRegistrado={handleRegistrado}
+            />
+
+            <div className="task-card__modal-acoes">
+              <button
+                type="button"
+                onClick={handleCancelarRegistrarAcordo}
+                data-testid="task-card-registrar-acordo-cancelar"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </article>
   );

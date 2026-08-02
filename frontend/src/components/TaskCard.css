@@ -85,10 +85,35 @@
   height: 1rem;
 }
 
-.task-card__painel-acordo {
+.task-card__modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.task-card__modal {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 1.5rem;
+  max-width: 28rem;
+  width: 90%;
+  text-align: left;
+}
+
+.task-card__modal-titulo {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.task-card__modal-acoes {
+  display: flex;
+  gap: 0.5rem;
   margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--color-border);
 }
 
 .task-card__editar-form {
