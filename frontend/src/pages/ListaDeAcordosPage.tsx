@@ -298,7 +298,18 @@ export function ListaDeAcordosPage() {
   // recarregamento) falha, os grupos continuam exibidos com os valores do
   // último carregamento bem-sucedido, junto com a mensagem de erro e a
   // ação de repetir — em vez de serem substituídos apenas pelo erro.
-  const exibirGrupos = lista !== null && (status === 'sucesso' || status === 'erro');
+  //
+  // Pelo mesmo motivo, durante um recarregamento em andamento
+  // (`status === 'carregando'`) que já possui uma lista carregada
+  // anteriormente — como o disparado por `handleAcordoAlterado` após
+  // registrar/finalizar/repetir um Acordo — os grupos permanecem
+  // renderizados com os valores anteriores em vez de serem desmontados e
+  // substituídos pela indicação de carregamento. Desmontar a lista nesse
+  // caso reduzia a altura da página momentaneamente e fazia o navegador
+  // perder a posição de scroll do Usuário ao reexibir a lista atualizada.
+  // Apenas o carregamento inicial (sem nenhum valor anterior) exibe a
+  // indicação de carregamento no lugar dos grupos.
+  const exibirGrupos = lista !== null;
 
   return (
     <main className="lista-de-acordos-page">
@@ -321,7 +332,9 @@ export function ListaDeAcordosPage() {
         />
       </form>
 
-      {status === 'carregando' && <p role="status">Carregando lista de Tasks...</p>}
+      {status === 'carregando' && lista === null && (
+        <p role="status">Carregando lista de Tasks...</p>
+      )}
 
       {status === 'erro' && (
         <div className="lista-de-acordos-page__erro-container">
