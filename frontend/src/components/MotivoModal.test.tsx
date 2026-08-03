@@ -199,4 +199,68 @@ describe('MotivoModal', () => {
     expect(combobox.value).toBe('Aguardando revisão');
     expect(onCancelar).not.toHaveBeenCalled();
   });
+
+  // Bugfix: com `motivoInicial` pré-preenchido, o `<datalist>` nativo
+  // filtra as opções exibidas pelo texto corrente do input — sem limpar
+  // esse valor ao focar o campo, abrir a lista só mostraria motivos que
+  // contêm o texto pré-preenchido, escondendo os demais e impedindo o
+  // usuário de trocar de motivo sem apagar manualmente o que está escrito.
+  it('limpa o valor pré-preenchido ao focar o campo, permitindo ver todos os motivos (Requisito 3.1)', async () => {
+    listarMotivos.mockResolvedValue([
+      { id: 'm1', nome: 'Dependência externa' },
+      { id: 'm2', nome: 'Problema ambiente' },
+    ]);
+
+    render(
+      <MotivoModal
+        titulo="Marcar como não cumprido"
+        motivoInicial="Dependência externa"
+        onConfirmar={vi.fn()}
+        onCancelar={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(listarMotivos).toHaveBeenCalledTimes(1));
+
+    const combobox = screen.getByTestId('motivo-modal-combobox') as HTMLInputElement;
+    // O foco automático inicial (Requisito 3.1) não deve limpar o valor.
+    expect(combobox.value).toBe('Dependência externa');
+
+    // Simula o usuário clicando/focando o campo novamente (um segundo
+    // foco, distinto do automático): o valor pré-preenchido é limpo para
+    // que a lista completa de motivos fique visível.
+    fireEvent.blur(combobox);
+    fireEvent.focus(combobox);
+    expect(combobox.value).toBe('');
+
+    // Perder o foco sem digitar nem selecionar nada restaura o valor
+    // original em vez de deixar o campo vazio.
+    fireEvent.blur(combobox);
+    expect(combobox.value).toBe('Dependência externa');
+  });
+
+  it('mantém o campo vazio ao focar novamente após o usuário editar o valor pré-preenchido', async () => {
+    listarMotivos.mockResolvedValue([]);
+
+    render(
+      <MotivoModal
+        titulo="Marcar como não cumprido"
+        motivoInicial="Dependência externa"
+        onConfirmar={vi.fn()}
+        onCancelar={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(listarMotivos).toHaveBeenCalledTimes(1));
+
+    const combobox = screen.getByTestId('motivo-modal-combobox') as HTMLInputElement;
+
+    fireEvent.change(combobox, { target: { value: 'Novo motivo digitado' } });
+    fireEvent.blur(combobox);
+    fireEvent.focus(combobox);
+
+    // Já não é mais o valor "automático": foco/blur não devem apagar ou
+    // restaurar nada além do que o usuário digitou.
+    expect(combobox.value).toBe('Novo motivo digitado');
+  });
 });

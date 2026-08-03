@@ -161,14 +161,45 @@ describe('task routes (POST /tasks)', () => {
       expect(res.body.taskComAcordo).toEqual([]);
     });
 
-    it('returns responsavelId, estadoCumprimentoAcordoAtual and ultimoMotivoNome for taskComAcordo items (Requirements 8.1, 2.1)', async () => {
+    it('returns responsavelId, estadoCumprimentoAcordoAtual and ultimoMotivoNome for a taskComAcordo item whose Acordo_Atual is itself não cumprido (Requirements 8.1, 2.1)', async () => {
       const usuario = await prisma.usuarioCadastrado.create({ data: { nomeLogin: 'joao.silva' } });
       const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
       const motivo = await prisma.motivoNaoCumprimento.create({ data: { nome: 'Motivo registrado' } });
       const task = await prisma.task.create({
         data: { titulo: 'Task com motivo', ordemExibicao: 0, responsavelId: usuario.id },
       });
-      const acordoAnterior = await prisma.acordo.create({
+      const acordoAtual = await prisma.acordo.create({
+        data: {
+          taskId: task.id,
+          tipoAcordoId: tipoAcordo.id,
+          estadoCumprimento: 'nao_cumprido',
+          motivoNaoCumprimentoId: motivo.id,
+          dataRegistro: new Date('2024-01-01T00:00:00.000Z'),
+        },
+      });
+      await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordoAtual.id } });
+
+      const res = await request(app).get('/tasks');
+
+      expect(res.status).toBe(200);
+      const item = res.body.taskComAcordo.find((t: { id: string }) => t.id === task.id);
+      expect(item).toMatchObject({
+        responsavelId: usuario.id,
+        estadoCumprimentoAcordoAtual: 'nao_cumprido',
+        ultimoMotivoNome: motivo.nome,
+      });
+    });
+
+    // Bugfix: uma vez que o ciclo de não-cumprimento é resolvido (um novo
+    // Acordo é registrado normalmente, sem passar por "Repetir último
+    // acordo"), o Ultimo_Motivo_Informado do ciclo anterior deixa de ser
+    // relevante e não deve mais aparecer — mesmo que a Task nunca tenha
+    // tido nenhum outro Acordo com motivo.
+    it('omits ultimoMotivoNome once a fresh Acordo is registered after a resolved não-cumprimento cycle', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const motivo = await prisma.motivoNaoCumprimento.create({ data: { nome: 'Motivo antigo' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task com ciclo resolvido', ordemExibicao: 0 } });
+      await prisma.acordo.create({
         data: {
           taskId: task.id,
           tipoAcordoId: tipoAcordo.id,
@@ -184,18 +215,60 @@ describe('task routes (POST /tasks)', () => {
           dataRegistro: new Date('2024-02-01T00:00:00.000Z'),
         },
       });
+      // `repeteAcordoNaoCumprido` permanece `false` (default): este novo
+      // Acordo foi registrado normalmente (ex.: via "Registrar Acordo"),
+      // não por "Repetir último acordo" — o alerta e o motivo do ciclo
+      // anterior não devem mais aparecer.
       await prisma.task.update({ where: { id: task.id }, data: { acordoAtualId: acordoAtual.id } });
 
       const res = await request(app).get('/tasks');
 
       expect(res.status).toBe(200);
       const item = res.body.taskComAcordo.find((t: { id: string }) => t.id === task.id);
+      expect(item).toMatchObject({ estadoCumprimentoAcordoAtual: 'pendente' });
+      expect(item.ultimoMotivoNome).toBeUndefined();
+      expect(item.alerta).toBe(false);
+    });
+
+    // Enquanto o Acordo_Atual é uma repetição `pendente` recém-criada de
+    // um Acordo não cumprido do mesmo Tipo_de_Acordo (fluxo "Repetir
+    // último acordo"), o motivo do ciclo ainda em aberto continua visível
+    // — refletindo o motivo do Acordo que ela substituiu, já que ela
+    // mesma ainda não foi avaliada.
+    it('keeps ultimoMotivoNome visible while the Acordo_Atual is a pending repetição of a não-cumprido Acordo', async () => {
+      const tipoAcordo = await prisma.tipoAcordo.create({ data: { nome: 'Enviar para review' } });
+      const motivo = await prisma.motivoNaoCumprimento.create({ data: { nome: 'Dependência externa' } });
+      const task = await prisma.task.create({ data: { titulo: 'Task repetindo acordo', ordemExibicao: 0 } });
+      await prisma.acordo.create({
+        data: {
+          taskId: task.id,
+          tipoAcordoId: tipoAcordo.id,
+          estadoCumprimento: 'nao_cumprido',
+          motivoNaoCumprimentoId: motivo.id,
+          dataRegistro: new Date('2024-01-01T00:00:00.000Z'),
+        },
+      });
+      const acordoAtual = await prisma.acordo.create({
+        data: {
+          taskId: task.id,
+          tipoAcordoId: tipoAcordo.id,
+          dataRegistro: new Date('2024-02-01T00:00:00.000Z'),
+        },
+      });
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { acordoAtualId: acordoAtual.id, repeteAcordoNaoCumprido: true },
+      });
+
+      const res = await request(app).get('/tasks');
+
+      expect(res.status).toBe(200);
+      const item = res.body.taskComAcordo.find((t: { id: string }) => t.id === task.id);
       expect(item).toMatchObject({
-        responsavelId: usuario.id,
         estadoCumprimentoAcordoAtual: 'pendente',
         ultimoMotivoNome: motivo.nome,
+        alerta: true,
       });
-      expect(acordoAnterior.motivoNaoCumprimentoId).toBe(motivo.id);
     });
   });
 

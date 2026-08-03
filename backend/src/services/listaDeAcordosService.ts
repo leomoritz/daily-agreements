@@ -22,10 +22,17 @@
 // Task_Nova items never carry this indicator, since they have no
 // Acordo_Atual to evaluate. Each Task_Com_Acordo item also carries the
 // Acordo_Atual's current `estadoCumprimentoAcordoAtual` (Requirements
-// 8.1, 8.4) and the Ultimo_Motivo_Informado (`ultimoMotivoNome`), derived
-// from the Task's most recent Acordo that carries a
-// Motivo_de_Nao_Cumprimento, omitted when none exists (Requirements 2.1,
-// 2.3, 2.5, 2.6).
+// 8.1, 8.4) and the Ultimo_Motivo_Informado (`ultimoMotivoNome`), scoped
+// to the current ciclo de não-cumprimento: present only while the
+// não-cumprimento alert (`alerta`) is active for the Task — i.e. while
+// the Acordo_Atual itself is `nao_cumprido`, or while it is a fresh
+// `pendente` repetição of a `nao_cumprido` Acordo of the same
+// Tipo_de_Acordo (`Task.repeteAcordoNaoCumprido`) — and derived,
+// respectively, from that Acordo_Atual's own motivo or from the motivo of
+// the Acordo it just replaced. Once the cycle is resolved (the
+// Acordo_Atual is evaluated as `cumprido`, clearing both the alert and
+// `repeteAcordoNaoCumprido`), `ultimoMotivoNome` goes back to absent
+// until a new não-cumprimento is registered.
 //
 // `obterLista` (task 15.6) additionally accepts an optional `filtro`: when
 // a non-empty term is given, only Tasks whose título contains the term
@@ -102,10 +109,15 @@ export interface TaskComAcordoItem {
   /** The Task's current count of consecutive "Avaliar e planejar" cycles, included alongside `alertaTentativasAvaliarPlanejar`. */
   tentativasAvaliarPlanejar: number;
   /**
-   * The Ultimo_Motivo_Informado: the `nome` of the Motivo_de_Nao_Cumprimento
-   * associated with the Task's most recent Acordo that carries one, absent
-   * when no Acordo of the Task has a motivo (Requirements 2.1, 2.3, 2.5,
-   * 2.6).
+   * The Ultimo_Motivo_Informado, scoped to the current ciclo de
+   * não-cumprimento: the `nome` of the Motivo_de_Nao_Cumprimento
+   * associated with the Acordo that is currently triggering `alerta` for
+   * this Task — the Acordo_Atual's own motivo when it is itself
+   * `nao_cumprido`, or the motivo of the Acordo it just replaced when the
+   * Acordo_Atual is a fresh `pendente` repetição (`repeteAcordoNaoCumprido`).
+   * Absent whenever `alerta` is `false` (the cycle was resolved by a
+   * cumprido evaluation or a fresh Acordo was registered), or when the
+   * triggering Acordo carries no motivo.
    */
   ultimoMotivoNome?: string;
 }
@@ -287,11 +299,21 @@ export class ListaDeAcordosService {
     const naoCumprido = acordoAtual.estadoCumprimento === ESTADO_NAO_CUMPRIDO || task.repeteAcordoNaoCumprido;
     const alertaTentativasAvaliarPlanejar =
       task.tentativasAvaliarPlanejar >= LIMITE_TENTATIVAS_AVALIAR_PLANEJAR_PARA_ALERTA;
-    // Ultimo_Motivo_Informado: nome do Motivo_de_Nao_Cumprimento do Acordo
-    // mais recente da Task que tem motivo, independente do
-    // estadoCumprimento do Acordo_Atual (Requirement 2.6); ausente quando
-    // nenhum Acordo da Task tem motivo (Requirement 2.2).
-    const ultimoMotivoNome = task.acordos[0]?.motivoNaoCumprimento?.nome ?? undefined;
+    // Ultimo_Motivo_Informado, escopado ao ciclo de não-cumprimento
+    // corrente: só aparece enquanto `alerta` estiver ativo para essa
+    // Task, refletindo o motivo do próprio Acordo_Atual (quando ele
+    // mesmo está `nao_cumprido`) ou o motivo do Acordo imediatamente
+    // anterior (quando o Acordo_Atual é uma repetição `pendente` recém
+    // criada — `task.repeteAcordoNaoCumprido`, cujo motivo relevante é o
+    // do Acordo que ela substituiu, não o dela mesma, que ainda não foi
+    // avaliada). Uma vez que o ciclo é resolvido (avaliação cumprida,
+    // que também zera `alerta` e `repeteAcordoNaoCumprido`), o campo
+    // volta a ficar ausente até um novo não cumprimento ser registrado.
+    const ultimoMotivoNome = naoCumprido
+      ? acordoAtual.estadoCumprimento === ESTADO_NAO_CUMPRIDO
+        ? acordoAtual.motivoNaoCumprimento?.nome ?? undefined
+        : task.acordos.find((acordo) => acordo.id !== acordoAtual.id)?.motivoNaoCumprimento?.nome ?? undefined
+      : undefined;
 
     return {
       id: task.id,

@@ -7,15 +7,25 @@
 // Task_Com_Acordo, exibe título, Tipo_de_Acordo, Responsável (quando
 // houver) e, na ordem exigida, "Registrado em" → Campo_Numero_de_Tentativas
 // (sempre, inclusive zero) → Campo_Ultimo_Motivo (omitido, com o rótulo,
-// quando a Task não possui Ultimo_Motivo_Informado, ou quando o
-// Acordo_Atual está `cumprido` — o motivo de uma tentativa anterior deixa
-// de ser relevante depois que o Acordo_Atual foi cumprido). Requisito 3.3
-// (spec base): para Task_Nova, exibe título e Responsável (quando
-// houver), sem Campo_Numero_de_Tentativas nem Campo_Ultimo_Motivo.
+// quando a Task não possui Ultimo_Motivo_Informado). O backend já escopa
+// o Ultimo_Motivo_Informado ao ciclo de não-cumprimento corrente (ver
+// listaDeAcordosService.ts): o campo fica ausente assim que o Acordo_Atual
+// é avaliado como cumprido e um novo Acordo é registrado normalmente,
+// voltando a aparecer apenas quando um novo não cumprimento é registrado
+// (inclusive já na primeira repetição pendente via "Repetir último
+// acordo"). Requisito 3.3 (spec base): para Task_Nova, exibe título e
+// Responsável (quando houver), sem Campo_Numero_de_Tentativas nem
+// Campo_Ultimo_Motivo.
 // Requisito 1.4, 1.5, 1.6: os textos de alerta ("Alerta: Acordo não
 // cumprido" e "Alerta: número de tentativas de 'Avaliar e planejar'
 // alto") não contêm nenhum contador — o Campo_Numero_de_Tentativas é a
-// única origem do valor do Nº_Tentativas.
+// única origem do valor exibido.
+// Campo_Numero_de_Tentativas por Tipo_de_Acordo: quando o Tipo_de_Acordo
+// do Acordo_Atual é "Avaliar e planejar", o campo exibe
+// `tentativasAvaliarPlanejar` (o contador que de fato incrementa nesse
+// fluxo, já que a repetição é avaliada como cumprido); para qualquer
+// outro Tipo_de_Acordo, exibe `numTentativas`, como antes. O rótulo
+// "Nº de tentativas:" permanece o mesmo em ambos os casos.
 //
 // Requisito 9.1/9.2/9.6/9.7 (edição de título/Responsável): quando
 // `onTaskEditada` é informado, um botão "Editar" abre um modal com um
@@ -174,6 +184,18 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
 
   const tipoAcordoAtual = comAcordo ? item.tipoAcordoNome : undefined;
   const ehTipoAvaliarPlanejar = tipoAcordoAtual === TIPO_ACORDO_AVALIAR_PLANEJAR;
+
+  // Campo_Numero_de_Tentativas: quando o Tipo_de_Acordo do Acordo_Atual é
+  // "Avaliar e planejar", o contador relevante é o de ciclos consecutivos
+  // desse tipo (tentativasAvaliarPlanejar) — numTentativas nunca
+  // incrementa nesse fluxo, já que ele só conta avaliações não
+  // cumpridas. Para qualquer outro Tipo_de_Acordo, o campo continua
+  // refletindo numTentativas, como antes.
+  const numTentativasExibido = comAcordo
+    ? ehTipoAvaliarPlanejar
+      ? item.tentativasAvaliarPlanejar
+      : item.numTentativas
+    : 0;
 
   // Ação "Marcar como não cumprido": oculta (não apenas desabilita) para
   // Acordos de "Avaliar e planejar", que só são avaliados por repetição
@@ -431,9 +453,9 @@ export function TaskCard({ item, onTaskEditada, onTaskRemovida, onAcordoAlterado
             {formatarDataRegistro(item.dataRegistroAcordoAtual)}
           </p>
           <p className="task-card__num-tentativas" data-testid="task-card-num-tentativas">
-            <span className="task-card__label">Nº de tentativas:</span> {item.numTentativas}
+            <span className="task-card__label">Nº de tentativas:</span> {numTentativasExibido}
           </p>
-          {item.ultimoMotivoNome && item.estadoCumprimentoAcordoAtual !== 'cumprido' && (
+          {item.ultimoMotivoNome && (
             <p className="task-card__ultimo-motivo" data-testid="task-card-ultimo-motivo">
               <span className="task-card__label">Último motivo informado:</span>{' '}
               {item.ultimoMotivoNome}

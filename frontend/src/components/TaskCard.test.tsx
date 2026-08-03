@@ -140,6 +140,39 @@ describe('TaskCard', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  // Bugfix: para Acordo_Atual de Tipo_de_Acordo "Avaliar e planejar", o
+  // Campo_Numero_de_Tentativas exibe tentativasAvaliarPlanejar em vez de
+  // numTentativas — esse último nunca incrementa nesse fluxo (a
+  // repetição é avaliada como cumprido), então mostrá-lo sempre em zero
+  // escondia o progresso real dos ciclos de "Avaliar e planejar".
+  it('exibe tentativasAvaliarPlanejar no Campo_Numero_de_Tentativas quando o Tipo_de_Acordo é "Avaliar e planejar"', () => {
+    render(
+      <TaskCard
+        item={criarTaskComAcordo({
+          tipoAcordoNome: 'Avaliar e planejar',
+          numTentativas: 0,
+          tentativasAvaliarPlanejar: 5,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('task-card-num-tentativas')).toHaveTextContent('Nº de tentativas: 5');
+  });
+
+  it('exibe numTentativas no Campo_Numero_de_Tentativas para qualquer outro Tipo_de_Acordo', () => {
+    render(
+      <TaskCard
+        item={criarTaskComAcordo({
+          tipoAcordoNome: 'Enviar para review',
+          numTentativas: 7,
+          tentativasAvaliarPlanejar: 5,
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId('task-card-num-tentativas')).toHaveTextContent('Nº de tentativas: 7');
+  });
+
   it('rejeita edição com título vazio, exibindo o erro e mantendo o modo de edição (Requisito 9.2)', async () => {
     listarUsuarios.mockResolvedValue([]);
     editarTask.mockRejectedValue(new ApiError(400, 'TITULO_INVALIDO', 'Título é obrigatório.'));
@@ -357,10 +390,14 @@ describe('TaskCard', () => {
 
           // Requisitos 2.1, 2.2, 2.7, 10.3: Campo_Ultimo_Motivo exibe o nome exato
           // quando presente (inclusive espaços que façam parte do nome — daí não
-          // usar `.trim()` aqui) e o Acordo_Atual não está `cumprido`; fica
-          // ausente (com o rótulo) quando não houver motivo ou quando o
-          // Acordo_Atual está `cumprido`.
-          if (ultimoMotivoNome !== undefined && estadoCumprimentoAcordoAtual !== 'cumprido') {
+          // usar `.trim()` aqui); fica ausente (com o rótulo) quando ausente. O
+          // escopo ao ciclo de não-cumprimento corrente (ocultar quando o
+          // Acordo_Atual está cumprido) já é responsabilidade do backend
+          // (ver listaDeAcordosService.ts) — o card apenas reflete o valor
+          // recebido, independente de estadoCumprimentoAcordoAtual (evita
+          // duplicar a mesma regra em duas camadas, satisfazendo o mesmo
+          // Requisito 10.3 de fidelidade ao item recebido).
+          if (ultimoMotivoNome !== undefined) {
             const campoMotivo = screen.getByTestId('task-card-ultimo-motivo');
             expect(campoMotivo.textContent).toBe(
               `Último motivo informado: ${ultimoMotivoNome}`,

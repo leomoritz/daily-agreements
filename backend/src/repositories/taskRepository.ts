@@ -43,15 +43,20 @@ export type TaskWithAcordosEResponsavel = Prisma.TaskGetPayload<{
 }>;
 
 /**
- * A Task with its Acordo_Atual (and its Tipo_de_Acordo), its Responsável,
- * and its most recent Acordo that carries a Motivo_de_Nao_Cumprimento
- * (with that Motivo) eagerly loaded. Used by
- * `ListaDeAcordosService.obterLista` to derive `ultimoMotivoNome`
- * (Requirements 2.1, 2.3) without per-Task follow-up queries.
+ * A Task with its Acordo_Atual (and its Tipo_de_Acordo and
+ * Motivo_de_Nao_Cumprimento), its Responsável, and its 2 most recent
+ * Acordos (each with its Motivo_de_Nao_Cumprimento) eagerly loaded. Used
+ * by `ListaDeAcordosService.obterLista` to derive `ultimoMotivoNome`
+ * scoped to the current ciclo de não-cumprimento — the Acordo_Atual's own
+ * motivo when it is `nao_cumprido`, or the immediately preceding Acordo's
+ * motivo when the Acordo_Atual is a fresh repetition
+ * (`Task.repeteAcordoNaoCumprido`) — without per-Task follow-up queries.
+ * `take: 2` is enough: only the Acordo_Atual and the Acordo immediately
+ * before it ever matter for this derivation.
  */
 export type TaskWithAcordoAtualResponsavelEUltimoMotivo = Prisma.TaskGetPayload<{
   include: {
-    acordoAtual: { include: { tipoAcordo: true } };
+    acordoAtual: { include: { tipoAcordo: true; motivoNaoCumprimento: true } };
     responsavel: true;
     acordos: { include: { motivoNaoCumprimento: true } };
   };
@@ -162,11 +167,14 @@ export class TaskRepository {
 
   /**
    * Lists active Tasks (not concluída — Requirement 6.2), eagerly loading
-   * each Task's Acordo_Atual (with its Tipo_de_Acordo), Responsável, and
-   * its most recent Acordo that carries a Motivo_de_Nao_Cumprimento (with
-   * that Motivo). Used by `ListaDeAcordosService.obterLista` (Requirements
-   * 2.1, 2.3) to derive `ultimoMotivoNome` without per-Task follow-up
-   * queries.
+   * each Task's Acordo_Atual (with its Tipo_de_Acordo and
+   * Motivo_de_Nao_Cumprimento), Responsável, and its 2 most recent Acordos
+   * (each with its Motivo_de_Nao_Cumprimento), regardless of whether they
+   * carry one. Used by `ListaDeAcordosService.obterLista` to derive
+   * `ultimoMotivoNome` scoped to the current ciclo de não-cumprimento
+   * without per-Task follow-up queries — `take: 2` is enough because only
+   * the Acordo_Atual and the Acordo immediately preceding it ever matter
+   * for that derivation (see `ListaDeAcordosService.toTaskComAcordoItem`).
    */
   async listActiveWithAcordoAtualResponsavelEUltimoMotivo(): Promise<
     TaskWithAcordoAtualResponsavelEUltimoMotivo[]
@@ -174,13 +182,12 @@ export class TaskRepository {
     return this.prisma.task.findMany({
       where: { concluida: false },
       include: {
-        acordoAtual: { include: { tipoAcordo: true } },
+        acordoAtual: { include: { tipoAcordo: true, motivoNaoCumprimento: true } },
         responsavel: true,
         acordos: {
-          where: { motivoNaoCumprimentoId: { not: null } },
           include: { motivoNaoCumprimento: true },
           orderBy: [{ dataRegistro: 'desc' }, { id: 'desc' }],
-          take: 1,
+          take: 2,
         },
       },
     });

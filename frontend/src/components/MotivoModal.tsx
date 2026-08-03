@@ -24,13 +24,23 @@
 // Requisito 10.4: erro de rejeição preserva o valor do Combobox_de_Motivo,
 // exibindo a mensagem retornada pela API dentro do próprio modal.
 //
+// Combobox com `motivoInicial` e a lista completa de opções: o
+// `<datalist>` nativo filtra as sugestões exibidas comparando-as com o
+// texto corrente do `<input>` — com `motivoInicial` preenchido, abrir a
+// lista mostraria só as opções que contêm esse texto, escondendo as
+// demais. Para permitir trocar de motivo sem digitar/apagar manualmente,
+// o foco no campo (exceto o foco automático inicial do Requisito 3.1)
+// limpa temporariamente o valor ainda não editado pelo usuário, fazendo
+// o navegador exibir a lista completa; ao perder o foco sem nenhuma
+// seleção ou digitação, o valor original é restaurado.
+//
 // O componente não chama nenhuma API que mute um Acordo: apenas coleta
 // `motivoNome` (sem trim no cliente — trim e resolução case-insensitive
 // são do backend) e delega a operação a `onConfirmar`, permitindo
 // reutilização tanto para "Marcar como não cumprido" quanto para
 // "Repetir último acordo".
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { listarMotivos } from '../api/client';
 import { ApiError } from '../api/errors';
 import type { MotivoNaoCumprimento } from '../api/types';
@@ -56,6 +66,18 @@ export function MotivoModal({ titulo, motivoInicial, onConfirmar, onCancelar }: 
   const [motivoNome, setMotivoNome] = useState(motivoInicial ?? '');
   const [enviando, setEnviando] = useState(false);
   const [erroSubmissao, setErroSubmissao] = useState<string | null>(null);
+
+  // Rastreia se o valor corrente ainda é exatamente o `motivoInicial`
+  // pré-preenchido, sem nenhuma edição do usuário — usado para decidir se
+  // um foco no campo deve limpá-lo temporariamente (ver comentário de
+  // topo de arquivo) e se um blur sem edição deve restaurá-lo.
+  const [preenchidoAutomaticamente, setPreenchidoAutomaticamente] = useState(
+    motivoInicial !== undefined,
+  );
+  // Ignora o primeiro foco (o foco automático do Requisito 3.1, disparado
+  // via `inputRef.current?.focus()` abaixo), para que o pré-preenchimento
+  // inicial não seja limpo antes mesmo do usuário interagir com o campo.
+  const primeiroFocoRef = useRef(true);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const datalistId = useId();
@@ -97,6 +119,34 @@ export function MotivoModal({ titulo, motivoInicial, onConfirmar, onCancelar }: 
     if (event.key === 'Escape') {
       event.preventDefault();
       handleCancelar();
+    }
+  }
+
+  function handleChangeMotivoNome(valor: string) {
+    setMotivoNome(valor);
+    setPreenchidoAutomaticamente(false);
+  }
+
+  // Ao focar o campo (exceto o foco automático inicial), limpa
+  // temporariamente um valor ainda não editado pelo usuário, para que o
+  // `<datalist>` nativo — que filtra as opções pelo texto corrente do
+  // input — exiba a lista completa de motivos em vez de só os que
+  // contêm o `motivoInicial` (ver comentário de topo de arquivo).
+  function handleFocus() {
+    if (primeiroFocoRef.current) {
+      primeiroFocoRef.current = false;
+      return;
+    }
+    if (preenchidoAutomaticamente) {
+      setMotivoNome('');
+    }
+  }
+
+  // Ao perder o foco sem nenhuma seleção ou digitação, restaura o
+  // `motivoInicial` pré-preenchido em vez de deixar o campo vazio.
+  function handleBlur(event: FocusEvent<HTMLInputElement>) {
+    if (preenchidoAutomaticamente && event.target.value === '') {
+      setMotivoNome(motivoInicial ?? '');
     }
   }
 
@@ -143,7 +193,9 @@ export function MotivoModal({ titulo, motivoInicial, onConfirmar, onCancelar }: 
             list={`${datalistId}-lista`}
             placeholder="Digite ou selecione um motivo"
             value={motivoNome}
-            onChange={(event) => setMotivoNome(event.target.value)}
+            onChange={(event) => handleChangeMotivoNome(event.target.value)}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
             disabled={enviando}
             data-testid="motivo-modal-combobox"
           />

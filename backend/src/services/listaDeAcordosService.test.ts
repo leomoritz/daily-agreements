@@ -57,56 +57,72 @@ class InMemoryTaskRepositoryComUltimoAcordo {
 
 /**
  * Builds a Task_Com_Acordo fake row shaped like
- * `TaskWithAcordoAtualResponsavelEUltimoMotivo`, with `acordos` set to
- * either `[]` (no Acordo of the Task ever had a motivo) or a single
- * pre-filtered Acordo carrying a `motivoNaoCumprimento.nome` — mirroring
- * exactly what `listActiveWithAcordoAtualResponsavelEUltimoMotivo`
- * returns (Requirements 2.3, 2.4, 2.5, 2.6).
+ * `TaskWithAcordoAtualResponsavelEUltimoMotivo`, mirroring exactly what
+ * `listActiveWithAcordoAtualResponsavelEUltimoMotivo` returns: the
+ * Acordo_Atual (with its own optional `motivoNaoCumprimento`) plus, when
+ * `repeteAcordoNaoCumprido` is true, a preceding Acordo carrying the
+ * motivo that triggered that repetição (Requirements 2.1, 2.3, 2.5, 2.6).
  */
-function taskComAcordoEUltimoMotivoFake(
-  id: string,
-  ordemExibicao: number,
-  estadoCumprimentoAcordoAtual: 'pendente' | 'cumprido' | 'nao_cumprido',
-  ultimoMotivoNome: string | undefined,
-  dataRegistro: Date,
-): TaskWithAcordoAtualResponsavelEUltimoMotivo {
-  const acordoAtualId = `acordo-atual-${id}`;
+function taskComAcordoEUltimoMotivoFake(spec: {
+  id: string;
+  ordemExibicao: number;
+  estadoCumprimentoAcordoAtual: 'pendente' | 'cumprido' | 'nao_cumprido';
+  /** Motivo do Acordo_Atual, usado quando `estadoCumprimentoAcordoAtual === 'nao_cumprido'`. */
+  motivoNoAcordoAtual: string | undefined;
+  /** Sinaliza uma repetição recém-criada de um Acordo não cumprido do mesmo Tipo_de_Acordo. */
+  repeteAcordoNaoCumprido: boolean;
+  /** Motivo do Acordo imediatamente anterior, usado quando `repeteAcordoNaoCumprido` é `true`. */
+  motivoNoAcordoAnterior: string | undefined;
+  dataRegistro: Date;
+}): TaskWithAcordoAtualResponsavelEUltimoMotivo {
+  const acordoAtualId = `acordo-atual-${spec.id}`;
+  const acordoAtual = {
+    id: acordoAtualId,
+    taskId: spec.id,
+    tipoAcordoId: 'tipo-1',
+    dataRegistro: spec.dataRegistro,
+    estadoCumprimento: spec.estadoCumprimentoAcordoAtual,
+    motivoNaoCumprimentoId:
+      spec.estadoCumprimentoAcordoAtual === 'nao_cumprido' && spec.motivoNoAcordoAtual !== undefined
+        ? `motivo-atual-${spec.id}`
+        : null,
+    motivoNaoCumprimento:
+      spec.estadoCumprimentoAcordoAtual === 'nao_cumprido' && spec.motivoNoAcordoAtual !== undefined
+        ? { id: `motivo-atual-${spec.id}`, nome: spec.motivoNoAcordoAtual }
+        : null,
+    tipoAcordo: { id: 'tipo-1', nome: 'Registrar Acordo' },
+  };
+  const acordoAnterior = {
+    id: `acordo-anterior-${spec.id}`,
+    taskId: spec.id,
+    tipoAcordoId: 'tipo-1',
+    dataRegistro: spec.dataRegistro,
+    estadoCumprimento: 'nao_cumprido',
+    motivoNaoCumprimentoId: spec.motivoNoAcordoAnterior !== undefined ? `motivo-anterior-${spec.id}` : null,
+    motivoNaoCumprimento:
+      spec.motivoNoAcordoAnterior !== undefined
+        ? { id: `motivo-anterior-${spec.id}`, nome: spec.motivoNoAcordoAnterior }
+        : null,
+  };
+
   return {
-    id,
-    titulo: `Task ${id}`,
+    id: spec.id,
+    titulo: `Task ${spec.id}`,
     descricao: null,
     responsavelId: null,
     numTentativas: 0,
     tentativasAvaliarPlanejar: 0,
-    repeteAcordoNaoCumprido: false,
-    ordemExibicao,
+    repeteAcordoNaoCumprido: spec.repeteAcordoNaoCumprido,
+    ordemExibicao: spec.ordemExibicao,
     acordoAtualId,
     concluida: false,
     criadaEm: new Date(),
     responsavel: null,
-    acordoAtual: {
-      id: acordoAtualId,
-      taskId: id,
-      tipoAcordoId: 'tipo-1',
-      dataRegistro,
-      estadoCumprimento: estadoCumprimentoAcordoAtual,
-      motivoNaoCumprimentoId: null,
-      tipoAcordo: { id: 'tipo-1', nome: 'Registrar Acordo' },
-    },
-    acordos:
-      ultimoMotivoNome !== undefined
-        ? [
-            {
-              id: `acordo-motivo-${id}`,
-              taskId: id,
-              tipoAcordoId: 'tipo-1',
-              dataRegistro,
-              estadoCumprimento: 'nao_cumprido',
-              motivoNaoCumprimentoId: `motivo-${id}`,
-              motivoNaoCumprimento: { id: `motivo-${id}`, nome: ultimoMotivoNome },
-            },
-          ]
-        : [],
+    acordoAtual,
+    // Mirrors the real query: `acordos` sempre inclui o Acordo_Atual
+    // (take 2, ordenado desc), acompanhado do Acordo imediatamente
+    // anterior quando existir.
+    acordos: spec.repeteAcordoNaoCumprido ? [acordoAtual, acordoAnterior] : [acordoAtual],
   } as unknown as TaskWithAcordoAtualResponsavelEUltimoMotivo;
 }
 
@@ -827,9 +843,10 @@ describe('ListaDeAcordosService.obterLista', () => {
     );
   });
 
-  // Property 3: Derivação do Ultimo_Motivo_Informado
-  // Validates: Requirements 2.3, 2.4, 2.5, 2.6
-  it('Feature: melhorias-acordos, Property 3: Derivação do Ultimo_Motivo_Informado', async () => {
+  // Property 3: Derivação do Ultimo_Motivo_Informado, escopada ao ciclo
+  // de não-cumprimento corrente
+  // Validates: Requirements 2.3, 2.4, 2.5, 2.6 (revisados)
+  it('Feature: melhorias-acordos, Property 3: Derivação do Ultimo_Motivo_Informado escopada ao ciclo corrente', async () => {
     const taskComAcordoEUltimoMotivoSpecArb = fc
       .array(
         fc.record({
@@ -839,17 +856,9 @@ describe('ListaDeAcordosService.obterLista', () => {
             'cumprido',
             'nao_cumprido',
           ),
-          // `undefined` reproduz o caso "Acordos sem motivo": nenhum
-          // Acordo da Task jamais teve um Motivo_de_Nao_Cumprimento
-          // associado, então o `acordos` pré-filtrado do repositório vem
-          // vazio (Requirement 2.2/2.4 negativo). Uma string presente
-          // reproduz o `acordos[0]` já resolvido pela query real.
-          ultimoMotivoNome: fc.option(fc.string({ minLength: 1, maxLength: 100 }), { nil: undefined }),
-          // Históricos de `dataRegistro` repetida entre Tasks distintas
-          // não têm efeito no cálculo por Task — cada Task já chega com
-          // seu próprio `acordos[0]` resolvido pelo repositório — mas o
-          // gerador ainda os exercita para cobrir o caso descrito na
-          // tarefa.
+          motivoNoAcordoAtual: fc.option(fc.string({ minLength: 1, maxLength: 100 }), { nil: undefined }),
+          repeteAcordoNaoCumprido: fc.boolean(),
+          motivoNoAcordoAnterior: fc.option(fc.string({ minLength: 1, maxLength: 100 }), { nil: undefined }),
           dataRegistro: fc.date(),
         }),
         { minLength: 0, maxLength: 30 },
@@ -866,13 +875,7 @@ describe('ListaDeAcordosService.obterLista', () => {
     await fc.assert(
       fc.asyncProperty(taskComAcordoEUltimoMotivoSpecArb, async (specs) => {
         const tasks = specs.map((spec, index) =>
-          taskComAcordoEUltimoMotivoFake(
-            spec.id,
-            index,
-            spec.estadoCumprimentoAcordoAtual,
-            spec.ultimoMotivoNome,
-            spec.dataRegistro,
-          ),
+          taskComAcordoEUltimoMotivoFake({ ...spec, ordemExibicao: index }),
         );
 
         const repository = new InMemoryTaskRepositoryComListaEUltimoMotivo(tasks);
@@ -885,21 +888,26 @@ describe('ListaDeAcordosService.obterLista', () => {
           expect(item).toBeDefined();
           if (!item) continue;
 
-          if (spec.ultimoMotivoNome !== undefined) {
-            // `acordos[0].motivoNaoCumprimento` definido: ultimoMotivoNome
-            // reproduz exatamente esse nome (Requirements 2.3, 2.4).
-            expect(item.ultimoMotivoNome).toBe(spec.ultimoMotivoNome);
-          } else {
-            // `acordos` vazio: nenhum Acordo da Task jamais teve motivo,
-            // então ultimoMotivoNome fica ausente (Requirement 2.5 —
-            // avaliação sem motivo não introduz um motivo novo).
+          const alertaAtivo = spec.estadoCumprimentoAcordoAtual === 'nao_cumprido' || spec.repeteAcordoNaoCumprido;
+
+          if (!alertaAtivo) {
+            // Sem alerta ativo (Acordo_Atual pendente/cumprido e sem
+            // repetição pendente de avaliação), o ciclo de
+            // não-cumprimento foi resolvido ou nunca existiu:
+            // ultimoMotivoNome fica ausente (Requirements 2.5, 2.6
+            // revisados).
             expect(item.ultimoMotivoNome).toBeUndefined();
+          } else if (spec.estadoCumprimentoAcordoAtual === 'nao_cumprido') {
+            // Acordo_Atual ele mesmo não cumprido: o motivo vem direto
+            // dele (Requirements 2.3, 2.4).
+            expect(item.ultimoMotivoNome).toBe(spec.motivoNoAcordoAtual);
+          } else {
+            // Repetição `pendente` recém-criada de um Acordo não
+            // cumprido: o motivo relevante é o do Acordo anterior que
+            // ela substituiu, não o dela mesma (ainda sem avaliação).
+            expect(item.ultimoMotivoNome).toBe(spec.motivoNoAcordoAnterior);
           }
 
-          // A derivação não depende do estadoCumprimento do Acordo_Atual
-          // (Requirement 2.6): o mesmo resultado vale para pendente,
-          // cumprido ou não cumprido — já verificado acima para cada
-          // spec, cujo estadoCumprimentoAcordoAtual varia livremente.
           expect(item.estadoCumprimentoAcordoAtual).toBe(spec.estadoCumprimentoAcordoAtual);
         }
       }),
@@ -955,7 +963,11 @@ describe('ListaDeAcordosService.obterLista', () => {
      * is fixed to `false` here so `alerta` reduces to a direct function of
      * `estadoCumprimentoAcordoAtual` (already covered on its own by
      * Property 13), keeping this property focused on completeness rather
-     * than alert derivation.
+     * than alert derivation — `ultimoMotivoNome` in the spec is only
+     * honored when `estadoCumprimentoAcordoAtual === 'nao_cumprido'`
+     * (the only case, with `repeteAcordoNaoCumprido` fixed to `false`,
+     * where the current derivation exposes a motivo at all), mirroring
+     * the Acordo_Atual's own `motivoNaoCumprimento`.
      */
     function taskFakeCompleto(
       spec: {
@@ -974,6 +986,22 @@ describe('ListaDeAcordosService.obterLista', () => {
     ): TaskWithAcordoAtualResponsavelEUltimoMotivo {
       const temResponsavel = spec.responsavelNome !== undefined;
       const acordoAtualId = spec.comAcordo ? `acordo-atual-${spec.id}` : null;
+      const motivoEfetivo =
+        spec.estadoCumprimentoAcordoAtual === 'nao_cumprido' ? spec.ultimoMotivoNome : undefined;
+
+      const acordoAtual = spec.comAcordo
+        ? {
+            id: acordoAtualId!,
+            taskId: spec.id,
+            tipoAcordoId: 'tipo-1',
+            dataRegistro: spec.dataRegistro,
+            estadoCumprimento: spec.estadoCumprimentoAcordoAtual,
+            motivoNaoCumprimentoId: motivoEfetivo !== undefined ? `motivo-${spec.id}` : null,
+            motivoNaoCumprimento:
+              motivoEfetivo !== undefined ? { id: `motivo-${spec.id}`, nome: motivoEfetivo } : null,
+            tipoAcordo: { id: 'tipo-1', nome: spec.tipoAcordoNome },
+          }
+        : null;
 
       return {
         id: spec.id,
@@ -988,31 +1016,8 @@ describe('ListaDeAcordosService.obterLista', () => {
         concluida: false,
         criadaEm: new Date(),
         responsavel: temResponsavel ? { id: `resp-${spec.id}`, nomeLogin: spec.responsavelNome! } : null,
-        acordoAtual: spec.comAcordo
-          ? {
-              id: acordoAtualId!,
-              taskId: spec.id,
-              tipoAcordoId: 'tipo-1',
-              dataRegistro: spec.dataRegistro,
-              estadoCumprimento: spec.estadoCumprimentoAcordoAtual,
-              motivoNaoCumprimentoId: null,
-              tipoAcordo: { id: 'tipo-1', nome: spec.tipoAcordoNome },
-            }
-          : null,
-        acordos:
-          spec.comAcordo && spec.ultimoMotivoNome !== undefined
-            ? [
-                {
-                  id: `acordo-motivo-${spec.id}`,
-                  taskId: spec.id,
-                  tipoAcordoId: 'tipo-1',
-                  dataRegistro: spec.dataRegistro,
-                  estadoCumprimento: 'nao_cumprido',
-                  motivoNaoCumprimentoId: `motivo-${spec.id}`,
-                  motivoNaoCumprimento: { id: `motivo-${spec.id}`, nome: spec.ultimoMotivoNome },
-                },
-              ]
-            : [],
+        acordoAtual,
+        acordos: acordoAtual ? [acordoAtual] : [],
       } as unknown as TaskWithAcordoAtualResponsavelEUltimoMotivo;
     }
 
@@ -1055,7 +1060,10 @@ describe('ListaDeAcordosService.obterLista', () => {
               expect(item.responsavelNome).toBeUndefined();
             }
 
-            if (spec.ultimoMotivoNome !== undefined) {
+            // ultimoMotivoNome só é exposto quando o Acordo_Atual está
+            // ele mesmo `nao_cumprido` (repeteAcordoNaoCumprido fixo em
+            // `false` nesta property) — ver comentário de `taskFakeCompleto`.
+            if (spec.estadoCumprimentoAcordoAtual === 'nao_cumprido' && spec.ultimoMotivoNome !== undefined) {
               expect(item.ultimoMotivoNome).toBe(spec.ultimoMotivoNome);
             } else {
               expect(item.ultimoMotivoNome).toBeUndefined();
