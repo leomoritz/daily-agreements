@@ -1,16 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskHistoricoModal } from './TaskHistoricoModal';
-import type { Acordo, TipoAcordo } from '../api/types';
+import type { Acordo, TipoAcordo, UsuarioCadastrado } from '../api/types';
 
-const { buscarHistorico, listarTiposDeAcordo } = vi.hoisted(() => ({
+const { buscarHistorico, listarTiposDeAcordo, listarUsuarios } = vi.hoisted(() => ({
   buscarHistorico: vi.fn(),
   listarTiposDeAcordo: vi.fn(),
+  listarUsuarios: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({
   buscarHistorico,
   listarTiposDeAcordo,
+  listarUsuarios,
 }));
 
 const TIPOS: TipoAcordo[] = [
@@ -18,11 +20,16 @@ const TIPOS: TipoAcordo[] = [
   { id: 'tipo-2', nome: 'Combinado com o cliente' },
 ];
 
+const USUARIOS: UsuarioCadastrado[] = [
+  { id: 'usuario-1', nomeLogin: 'ana.silva' },
+];
+
 function criarAcordo(overrides: Partial<Acordo> = {}): Acordo {
   return {
     id: 'acordo-1',
     taskId: 'task-1',
     tipoAcordoId: 'tipo-1',
+    responsavelId: null,
     dataRegistro: '2024-05-10T10:00:00.000Z',
     estadoCumprimento: 'pendente',
     motivoNaoCumprimentoId: null,
@@ -34,6 +41,7 @@ describe('TaskHistoricoModal', () => {
   beforeEach(() => {
     buscarHistorico.mockReset();
     listarTiposDeAcordo.mockReset().mockResolvedValue(TIPOS);
+    listarUsuarios.mockReset().mockResolvedValue(USUARIOS);
   });
 
   it('exibe indicação de histórico vazio, sem renderizar a lista, quando não há Acordos (Requisito 7.4)', async () => {
@@ -46,11 +54,12 @@ describe('TaskHistoricoModal', () => {
     expect(screen.queryByTestId('task-historico-modal-lista')).not.toBeInTheDocument();
   });
 
-  it('exibe todos os Acordos do histórico, na ordem retornada pela API, com Tipo de Acordo e estado traduzidos', async () => {
+  it('exibe todos os Acordos na ordem retornada e, quando houver, o Responsável antes dos demais campos', async () => {
     const acordos: Acordo[] = [
       criarAcordo({
         id: 'acordo-1',
         tipoAcordoId: 'tipo-1',
+        responsavelId: 'usuario-1',
         dataRegistro: '2024-05-10T10:00:00.000Z',
         estadoCumprimento: 'cumprido',
       }),
@@ -74,9 +83,16 @@ describe('TaskHistoricoModal', () => {
     const itens = await screen.findAllByTestId('task-historico-modal-item');
     expect(itens).toHaveLength(3);
 
+    expect(itens[0]).toHaveTextContent('ana.silva');
+    expect(
+      Array.from(itens[0].querySelectorAll('.task-historico-modal__label')).map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(['Responsável:', 'Tipo de Acordo:', 'Registrado em:', 'Estado:']);
     expect(itens[0]).toHaveTextContent('Combinado com o time');
     expect(itens[0]).toHaveTextContent('Cumprido');
 
+    expect(itens[1]).not.toHaveTextContent('Responsável:');
     expect(itens[1]).toHaveTextContent('Combinado com o cliente');
     expect(itens[1]).toHaveTextContent('Não cumprido');
 

@@ -120,10 +120,11 @@ Neste primeiro MVP, a aplicação NÃO realiza integração com o Azure Boards. 
 #### Critérios de Aceitação
 
 1. QUANDO um Usuário solicita o histórico de uma Task existente, O Sistema DEVE retornar todos os Acordos já registrados para essa Task, incluindo o Acordo_Atual quando houver, ordenados pela data de registro do mais antigo para o mais recente.
-2. QUANDO o Sistema retorna o histórico de uma Task, O Sistema DEVE incluir, para cada Acordo, o Tipo_de_Acordo, a data de registro e o estado de cumprimento.
+2. QUANDO o Sistema retorna o histórico de uma Task, O Sistema DEVE incluir, para cada Acordo, o Tipo_de_Acordo, o Responsável registrado no momento do Acordo quando houver, a data de registro e o estado de cumprimento.
 3. QUANDO um Acordo é substituído por um novo Acordo, O Sistema DEVE preservar o Acordo anterior no histórico da Task.
 4. QUANDO um Usuário solicita o histórico de uma Task que não possui nenhum Acordo registrado, O Sistema DEVE retornar uma lista vazia.
 5. SE um Usuário solicita o histórico de uma Task que não existe no Sistema, ENTÃO O Sistema DEVE rejeitar a operação e informar que a Task não foi encontrada.
+6. QUANDO o Responsável atual de uma Task muda ao registrar um novo Acordo, O Sistema DEVE manter inalterado o Responsável registrado nos Acordos anteriores dessa Task.
 
 ### Requisito 8: Classificação de Tasks na Lista de Acordos
 

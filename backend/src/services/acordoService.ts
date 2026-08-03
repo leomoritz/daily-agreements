@@ -513,6 +513,7 @@ export class AcordoService {
     const acordo = await this.acordoRepository.create({
       taskId,
       tipoAcordoId,
+      responsavelId: responsavelIdToSet,
       dataRegistro,
       estadoCumprimento: ESTADO_PENDENTE,
     });

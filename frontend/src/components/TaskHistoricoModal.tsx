@@ -6,17 +6,22 @@
 // recente — a própria API já retorna a lista ordenada por `dataRegistro`
 // ascendente (ver backend/src/services/taskService.ts >
 // `buscarHistorico`), então o modal apenas renderiza na ordem recebida.
-// Requisito 7.2: cada item exibe Tipo_de_Acordo, data de registro e
-// estado de cumprimento. Como `Acordo.tipoAcordoId` não traz o nome
-// resolvido, o modal também carrega `GET /tipos-de-acordo` e resolve o
-// nome localmente.
+// Requisito 7.2: cada item exibe Responsável quando houver, Tipo_de_Acordo,
+// data de registro e estado de cumprimento. Como as referências do Acordo
+// não trazem os nomes resolvidos, o modal carrega os respectivos cadastros
+// e resolve os nomes localmente.
 // Requisito 7.4: histórico vazio exibe uma indicação, em vez de uma
 // lista vazia.
 
 import { useEffect, useState } from 'react';
-import { buscarHistorico, listarTiposDeAcordo } from '../api/client';
+import { buscarHistorico, listarTiposDeAcordo, listarUsuarios } from '../api/client';
 import { ApiError } from '../api/errors';
-import type { Acordo, EstadoCumprimento, TipoAcordo } from '../api/types';
+import type {
+  Acordo,
+  EstadoCumprimento,
+  TipoAcordo,
+  UsuarioCadastrado,
+} from '../api/types';
 import './TaskHistoricoModal.css';
 
 type StatusCarregamento = 'carregando' | 'sucesso' | 'erro';
@@ -54,6 +59,7 @@ function formatarDataRegistro(dataIso: string): string {
 export function TaskHistoricoModal({ taskId, taskTitulo, onClose }: TaskHistoricoModalProps) {
   const [historico, setHistorico] = useState<Acordo[]>([]);
   const [tiposDeAcordo, setTiposDeAcordo] = useState<TipoAcordo[]>([]);
+  const [usuarios, setUsuarios] = useState<UsuarioCadastrado[]>([]);
   const [statusCarregamento, setStatusCarregamento] = useState<StatusCarregamento>('carregando');
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
 
@@ -63,11 +69,12 @@ export function TaskHistoricoModal({ taskId, taskTitulo, onClose }: TaskHistoric
     setStatusCarregamento('carregando');
     setErroCarregamento(null);
 
-    Promise.all([buscarHistorico(taskId), listarTiposDeAcordo()])
-      .then(([resultadoHistorico, resultadoTipos]) => {
+    Promise.all([buscarHistorico(taskId), listarTiposDeAcordo(), listarUsuarios()])
+      .then(([resultadoHistorico, resultadoTipos, resultadoUsuarios]) => {
         if (cancelado) return;
         setHistorico(resultadoHistorico);
         setTiposDeAcordo(resultadoTipos);
+        setUsuarios(resultadoUsuarios);
         setStatusCarregamento('sucesso');
       })
       .catch((error: unknown) => {
@@ -86,6 +93,11 @@ export function TaskHistoricoModal({ taskId, taskTitulo, onClose }: TaskHistoric
   function nomeDoTipoDeAcordo(tipoAcordoId: string): string {
     const tipo = tiposDeAcordo.find((candidato) => candidato.id === tipoAcordoId);
     return tipo ? tipo.nome : tipoAcordoId;
+  }
+
+  function nomeDoResponsavel(responsavelId: string): string {
+    const responsavel = usuarios.find((candidato) => candidato.id === responsavelId);
+    return responsavel ? responsavel.nomeLogin : responsavelId;
   }
 
   const tituloModal = taskTitulo
@@ -142,6 +154,12 @@ export function TaskHistoricoModal({ taskId, taskTitulo, onClose }: TaskHistoric
                 className="task-historico-modal__item"
                 data-testid="task-historico-modal-item"
               >
+                {acordo.responsavelId && (
+                  <p className="task-historico-modal__responsavel">
+                    <span className="task-historico-modal__label">Responsável:</span>{' '}
+                    {nomeDoResponsavel(acordo.responsavelId)}
+                  </p>
+                )}
                 <p className="task-historico-modal__tipo-acordo">
                   <span className="task-historico-modal__label">Tipo de Acordo:</span>{' '}
                   {nomeDoTipoDeAcordo(acordo.tipoAcordoId)}

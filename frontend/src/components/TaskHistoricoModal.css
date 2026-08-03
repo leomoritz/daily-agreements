@@ -61,6 +61,7 @@
   font-weight: 600;
 }
 
+.task-historico-modal__responsavel,
 .task-historico-modal__tipo-acordo,
 .task-historico-modal__data-registro,
 .task-historico-modal__estado {

@@ -24,6 +24,7 @@ type PrismaAcordoClient = typeof prisma;
 export interface AcordoCreateData {
   taskId: string;
   tipoAcordoId: string;
+  responsavelId?: string | null;
   dataRegistro?: Date;
   estadoCumprimento?: string;
   motivoNaoCumprimentoId?: string | null;

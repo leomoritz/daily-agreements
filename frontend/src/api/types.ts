@@ -27,6 +27,7 @@ export interface Acordo {
   id: string;
   taskId: string;
   tipoAcordoId: string;
+  responsavelId: string | null;
   dataRegistro: string;
   estadoCumprimento: EstadoCumprimento;
   motivoNaoCumprimentoId: string | null;

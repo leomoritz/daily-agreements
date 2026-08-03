@@ -32,6 +32,7 @@ function criarAcordo(overrides: Partial<Acordo> = {}): Acordo {
     id: 'acordo-1',
     taskId: 'task-1',
     tipoAcordoId: 'tipo-1',
+    responsavelId: null,
     dataRegistro: '2024-05-10T10:00:00.000Z',
     estadoCumprimento: 'pendente',
     motivoNaoCumprimentoId: null,

@@ -35,17 +35,20 @@ model Acordo {
   id                     String            @id @default(cuid())
   taskId                 String
   tipoAcordoId           String
+  responsavelId          String?
   dataRegistro           DateTime          @default(now())
   estadoCumprimento      String            @default("pendente")
   motivoNaoCumprimentoId String?
 
   task                   Task                  @relation("TaskAcordos", fields: [taskId], references: [id], onDelete: Cascade)
   tipoAcordo             TipoAcordo            @relation(fields: [tipoAcordoId], references: [id])
+  responsavel            UsuarioCadastrado?    @relation("AcordoResponsavel", fields: [responsavelId], references: [id], onDelete: SetNull)
   motivoNaoCumprimento   MotivoNaoCumprimento? @relation(fields: [motivoNaoCumprimentoId], references: [id])
   taskAtualDe            Task?                 @relation("TaskAcordoAtual")
 
   @@index([taskId])
   @@index([tipoAcordoId])
+  @@index([responsavelId])
   @@index([motivoNaoCumprimentoId])
 }
 
@@ -67,5 +70,6 @@ model UsuarioCadastrado {
   id        String @id @default(cuid())
   nomeLogin String @unique
 
-  tasks     Task[] @relation("TaskResponsavel")
+  tasks     Task[]   @relation("TaskResponsavel")
+  acordos   Acordo[] @relation("AcordoResponsavel")
 }

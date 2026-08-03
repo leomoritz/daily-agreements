@@ -156,6 +156,7 @@ interface Acordo {
   id: string;
   taskId: string;                 // Task à qual o Acordo pertence
   tipoAcordoId: string;           // referência a TipoAcordo.id (Requisito 2.2, 5.4)
+  responsavelId?: string;         // snapshot do Responsável no registro; não muda com Task.responsavelId (Requisito 7.2, 7.6)
   dataRegistro: string;           // ISO datetime, gerada pelo servidor (Requisito 2.3)
   estadoCumprimento: EstadoCumprimento;
   motivoNaoCumprimentoId?: string; // apenas quando estadoCumprimento === 'nao_cumprido' (Requisito 4.5–4.7)
